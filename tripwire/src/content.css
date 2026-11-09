@@ -1,12 +1,23 @@
-/* Inbox row highlights. !important is needed because webmail sites style rows heavily. */
-.pg-row-suspicious, .pg-row-suspicious > td {
-  background-color: #fff3b0 !important;
-  box-shadow: inset 5px 0 0 #e6a700 !important;
+/* Inbox row highlights: one smooth, continuous band across the whole row.
+   The colour goes on the row itself; its cells are made transparent so no per-cell edges or bars show.
+   !important is needed because webmail sites style rows heavily. */
+.pg-row-suspicious {
+  background: #fdea9b !important;
+  transition: background-color .25s ease;
 }
-.pg-row-phishing, .pg-row-phishing > td {
-  background-color: #ffd0d0 !important;
-  box-shadow: inset 5px 0 0 #c62828 !important;
+.pg-row-phishing {
+  background: #f39aa5 !important;
+  transition: background-color .25s ease;
 }
+.pg-row-suspicious > td, .pg-row-phishing > td,
+.pg-row-suspicious > div, .pg-row-phishing > div {
+  background: transparent !important;
+  box-shadow: none !important;
+  border-color: transparent !important;
+}
+.pg-row-suspicious:hover { background: #fbe17a !important; }
+.pg-row-phishing:hover { background: #ef8592 !important; }
+
 /* keep text readable even when the site is in dark mode */
 .pg-row-suspicious, .pg-row-suspicious *,
 .pg-row-phishing, .pg-row-phishing * { color: #1f2328 !important; }
