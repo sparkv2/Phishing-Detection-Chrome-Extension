@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Tripwire</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <header>
+    <img src="../icons/icon48.png" alt="" width="32" height="32">
+    <div class="ht">
+      <h1>Trip<span class="wire">wire</span></h1>
+      <div id="status" class="status">Checking this page…</div>
+    </div>
+    <label class="switch" title="Turn protection on or off">
+      <input type="checkbox" id="enabled" checked><span></span>
+    </label>
+  </header>
+
+  <div id="siteBox" class="box" hidden>
+    <p id="siteText"></p>
+    <button id="siteBtn" class="btn"></button>
+  </div>
+
+  <div class="stats">
+    <div><b id="sScanned">0</b><span>emails checked</span></div>
+    <div class="y"><b id="sSusp">0</b><span>suspicious</span></div>
+    <div class="r"><b id="sPhish">0</b><span>phishing</span></div>
+    <div><b id="sWarn">0</b><span>risky clicks stopped</span></div>
+  </div>
+
+  <details class="box legend" open>
+    <summary>What the colours mean</summary>
+    <p><span class="dot r"></span><b>Red</b> — known phishing: the sender or a link is on a list of confirmed scams, or you reported it. Don't click, don't reply. Report it.</p>
+    <p><span class="dot y"></span><b>Yellow</b> — suspicious: it has warning signs but isn't a confirmed scam. Check the sender and links before doing anything.</p>
+    <p><span class="dot g"></span>No colour — no warning signs found.</p>
+    <p class="muted">Open any email to see a summary, a safety score (0 = phishing, 100 = safe) and the reasons.</p>
+  </details>
+
+  <details class="box">
+    <summary>Trusted senders (<span id="trustCount">0</span>)</summary>
+    <ul id="trustList" class="list"></ul>
+  </details>
+
+  <details class="box">
+    <summary>Senders you reported (<span id="blockCount">0</span>)</summary>
+    <ul id="blockList" class="list"></ul>
+  </details>
+
+  <details class="box">
+    <summary>Privacy &amp; known-threat lists</summary>
+    <p class="muted">Every email is checked <b>on your computer</b>. Email content is never sent, saved or shared. Only counts and your own trusted/reported lists are stored, on this device.</p>
+    <p class="muted" id="feedInfo">Loading threat lists…</p>
+    <ul id="intelList" class="list intel"></ul>
+    <label class="row"><input type="checkbox" id="useFeed"> Keep these lists up to date automatically (downloads public lists twice a day; sends nothing about you)</label>
+    <button id="feedBtn" class="btn small">Update lists now</button>
+  </details>
+
+  <div class="tip" id="tip"></div>
+  <script src="popup.js"></script>
+</body>
+</html>

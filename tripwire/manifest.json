@@ -1,0 +1,31 @@
+{
+  "manifest_version": 3,
+  "name": "Tripwire — Phishing Email Checker",
+  "short_name": "Tripwire",
+  "version": "1.1.0",
+  "description": "Spots phishing emails in any webmail, highlights risky messages, explains why, and warns you before you click. Checks run privately on your device.",
+  "icons": { "16": "icons/icon16.png", "32": "icons/icon32.png", "48": "icons/icon48.png", "128": "icons/icon128.png" },
+  "action": {
+    "default_title": "Tripwire",
+    "default_popup": "popup/popup.html",
+    "default_icon": { "16": "icons/icon16.png", "32": "icons/icon32.png" }
+  },
+  "background": { "service_worker": "background.js" },
+  "permissions": ["storage", "alarms", "activeTab"],
+  "host_permissions": [
+    "https://openphish.com/*",
+    "https://raw.githubusercontent.com/*",
+    "https://malware-filter.gitlab.io/*",
+    "https://curbengh.github.io/*",
+    "https://hole.cert.pl/*",
+    "https://feodotracker.abuse.ch/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["src/data.js", "src/analyzer.js", "src/intel.js", "src/providers.js", "src/ui.js", "src/content.js"],
+      "css": ["src/content.css"],
+      "run_at": "document_idle"
+    }
+  ]
+}

@@ -1,0 +1,111 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Analyzer tests</title></head>
+<body><pre id="out"></pre>
+<script src="../src/data.js"></script>
+<script src="../src/analyzer.js"></script>
+<script src="../src/intel.js"></script>
+<script>
+const A = PG_Analyzer;
+const out = [];
+let pass = 0, fail = 0;
+function check(name, input, expectLevel, extra) {
+  let r;
+  try { r = A.analyzeEmail(Object.assign({ context: 'open' }, input), extra || {}); }
+  catch (e) { out.push(`ERROR ${name}: ${e.stack}`); fail++; return; }
+  const ok = Array.isArray(expectLevel) ? expectLevel.includes(r.level) : r.level === expectLevel;
+  ok ? pass++ : fail++;
+  out.push(`${ok ? 'PASS' : 'FAIL'} [${r.level} ${r.score}] ${name}${ok ? '' : '  (expected ' + expectLevel + ')'}\n      ` +
+    (r.signals.map(s => `${s.id}(${s.weight})`).join(', ') || '-') + (r.asks.length ? `\n      asks: ${r.asks.join('; ')}` : '') +
+    (r.summary ? `\n      summary: ${r.summary}` : ''));
+}
+// ---------- phishing ----------
+check('PayPal lookalike + blocklist + IP link', { senderName: 'PayPal', senderEmail: 'service@paypa1-security.com', subject: 'Your account has been limited',
+  body: 'Dear Customer, We noticed unusual activity on your PayPal account. Your account has been limited and will be closed within 24 hours unless you verify your account. Please confirm your password and billing information immediately to restore access.',
+  links: [{ href: 'http://paypa1-security.com/login', text: 'Log in to PayPal' }, { href: 'http://198.51.100.23/secure', text: 'www.paypal.com' }] }, 'phishing');
+check('Microsoft from gmail + shortener', { senderName: 'Microsoft 365 Support', senderEmail: 'it.helpdesk.office365@gmail.com', subject: 'ACTION REQUIRED: Password expires today',
+  body: 'Dear user, Your Office 365 password expires today. Failure to verify will result in your mailbox being disabled. Click below to keep your current password. You will need to enter your password to confirm.',
+  links: [{ href: 'https://bit.ly/3xYz-o365', text: 'Keep my password' }] }, 'suspicious');
+check('DHL fee scam', { senderName: 'DHL Express', senderEmail: 'noreply@dhl-delivery-notice.top', subject: 'Package on hold: delivery fee unpaid',
+  body: 'Dear Customer, Your package could not be delivered because a processing fee of $1.99 is unpaid. Pay the fee within 48 hours or your package will be returned.',
+  links: [{ href: 'https://dhl.com.redelivery-fee.top/pay', text: 'Pay now' }] }, 'suspicious');
+check('Apple homoglyph (cyrillic a) sender', { senderName: 'Apple', senderEmail: 'id@аpple.com', subject: 'Your Apple ID was locked', body: 'Your Apple ID has been locked for security reasons. Sign in to unlock your account.', links: [{ href: 'https://xn--pple-43d.com/unlock', text: 'Unlock' }] }, 'suspicious');
+check('CEO gift card (content only)', { senderName: 'Mark (CEO)', senderEmail: 'mark.ceo.office@outlook.com', subject: 'Quick favor',
+  body: "Hi, Are you available? I need a favor. I'm in a meeting and can't talk. I need you to buy 5 gift cards for a client today, keep this confidential. Reply with the codes as soon as possible.", links: [] }, 'suspicious');
+check('Link text mismatch only', { senderName: 'Billing', senderEmail: 'billing@smallshop.example', subject: 'Invoice', body: 'Please see your invoice.',
+  links: [{ href: 'https://evil-login.example/x', text: 'https://www.chase.com/invoice' }] }, 'suspicious');
+check('User-reported domain', { senderName: 'Bob', senderEmail: 'bob@scammy.example', subject: 'hi', body: 'hello there friend how are you', links: [] }, 'phishing', { blocked: new Set(['scammy.example']) });
+check('Feed-listed link', { senderName: 'News', senderEmail: 'news@site.example', subject: 'Read', body: 'An article you might like to read today.', links: [{ href: 'https://bad.phish.example/a', text: 'Read more' }] }, 'phishing', { feed: new Set(['bad.phish.example']) });
+check('Display name contains other email', { senderName: 'support@paypal.com', senderEmail: 'x83@mailer.ru', subject: 'Receipt', body: 'Your payment details need to be updated. Update your payment now.', links: [] }, 'suspicious');
+
+// ---------- legitimate (false-positive traps) ----------
+check('Real Google security alert', { senderName: 'Google', senderEmail: 'no-reply@accounts.google.com', subject: 'Security alert',
+  body: 'A new sign-in on Windows. We noticed a new sign-in to your Google Account on a Windows device. If this was you, you don\'t need to do anything. If not, we\'ll help you secure your account. Check activity. You can also see security activity at https://myaccount.google.com/notifications',
+  links: [{ href: 'https://accounts.google.com/AccountChooser?continue=https://myaccount.google.com/alert', text: 'Check activity' }, { href: 'https://myaccount.google.com/notifications', text: 'https://myaccount.google.com/notifications' }] }, 'safe');
+check('Real Amazon shipping', { senderName: 'Amazon.com', senderEmail: 'shipment-tracking@amazon.com', subject: 'Your order has shipped', body: 'Hello Jordan, Your order of "USB-C Charging Cable (2-pack)" has shipped and should arrive on Thursday. You can track your package anytime from Your Orders.', links: [{ href: 'https://www.amazon.com/gp/your-account/order-history', text: 'View your order' }] }, 'safe');
+check('Coworker named Chase', { senderName: 'Chase Miller', senderEmail: 'chase.miller@gmail.com', subject: 'Lunch?', body: 'Hey, want to grab lunch tomorrow around noon? Let me know.', links: [] }, 'safe');
+check('Newsletter with tracking links + limited time', { senderName: 'Bean Box Coffee', senderEmail: 'hello@beanbox.example', subject: 'Limited time: 20% off', body: 'Our fall roasts are here. For a limited time, get 20% off your next bag. Shop now and enjoy free shipping on orders over $30. Unsubscribe here.',
+  links: [{ href: 'https://u12345.ct.sendgrid.net/ls/click?upn=abc', text: 'beanbox.example/shop' }, { href: 'https://u12345.ct.sendgrid.net/ls/click?upn=def', text: 'Shop now' }] }, 'safe');
+check('Real password reset from service', { senderName: 'Dropbox', senderEmail: 'no-reply@dropbox.com', subject: 'Reset your Dropbox password', body: 'Hi Jordan, Someone requested a new password for your Dropbox account. If you didn\'t make this request, you can ignore this email. Reset password.', links: [{ href: 'https://www.dropbox.com/password_reset?token=abc', text: 'Reset password' }] }, 'safe');
+check('Apple pie recipe site', { senderName: 'Grandma', senderEmail: 'grandma@family.example', subject: 'Recipe', body: 'Here is the recipe I told you about, it is delicious and easy to make.', links: [{ href: 'https://apple-pie-recipes.example/classic', text: 'Classic apple pie' }] }, 'safe');
+check('Company intranet office subdomain', { senderName: 'Facilities', senderEmail: 'facilities@mycompany.example', subject: 'Office closed Monday', body: 'The office will be closed Monday for the holiday. Enjoy the long weekend everyone.', links: [{ href: 'https://office.mycompany.example/calendar', text: 'Holiday calendar' }] }, 'safe');
+check('Outlook safelink to real site', { senderName: 'Sarah Kim', senderEmail: 'sarah@acme.example', subject: 'Notes', body: 'Thanks for a great meeting today, notes are in the shared doc for review before Friday.', links: [{ href: 'https://nam12.safelinks.protection.outlook.com/?url=https%3A%2F%2Fdocs.google.com%2Fdocument%2Fd%2Fx&data=1', text: 'docs.google.com/document' }] }, 'safe');
+check('Bank statement ready (real chase)', { senderName: 'Chase', senderEmail: 'no.reply.alerts@chase.com', subject: 'Your statement is ready', body: 'Your credit card statement is available. Your payment is due on 11/28. Sign in to chase.com to view it.', links: [{ href: 'https://www.chase.com/statements', text: 'chase.com' }] }, 'safe');
+check('Trusted sender overrides wording', { senderName: 'Dad', senderEmail: 'dad@family.example', subject: 'URGENT', body: 'Urgent! Please send me the bank account routing number immediately for the house payment.', links: [] }, 'safe', { trusted: new Set(['dad@family.example']) });
+
+// ---------- URL unit checks ----------
+const urls = [['https://paypal.com.secure-login.ru/x', true], ['https://www.paypal.com/signin', false], ['https://micros0ft.com', true],
+  ['https://amazon-billing-update.com', true], ['https://goggle.com', true], ['https://linkedin.com/in/x', false], ['https://zoominfo.com', false],
+  ['https://purchase.example', false], ['https://amazon.es/dp/1', true], ['http://user@evil.example/', true]];
+for (const [u, bad] of urls) { const r = A.analyzeUrl(u, {}); const ok = (r.weight > 0) === bad; ok ? pass++ : fail++;
+  out.push(`${ok ? 'PASS' : 'FAIL'} url ${u} weight=${r.weight} ${r.signals.map(s => s.id).join(',')}`); }
+
+// ---------- threat categories (lookup results as the background would return them) ----------
+const T = (entries) => ({ threats: new Map(entries) });
+function expectCat(name, input, lists, cat) {
+  const r = A.analyzeEmail(Object.assign({ context: 'open', senderName: 'News', senderEmail: 'news@site.example', subject: 'Hello', body: 'An update for you to read today.' }, input), lists);
+  const ok = r.level === 'phishing' && r.threatCategory === cat && r.score === 0; ok ? pass++ : fail++;
+  out.push(`${ok ? 'PASS' : 'FAIL'} [${r.level} ${r.score} ${r.threatCategory}] ${name}\n      ${(r.signals.find(s => s.category === 'known') || {}).explain || '-'}`);
+}
+expectCat('Malware link (URLhaus)', { links: [{ href: 'http://dl.badfiles.example/invoice.exe', text: 'Download invoice' }] },
+  T([['dl.badfiles.example', { cat: 'malware', source: 'URLhaus (abuse.ch) online malware sites', matched: 'badfiles.example' }]]), 'malware');
+expectCat('C2 server IP link (Feodo)', { links: [{ href: 'http://203.0.113.50:8080/gate.php', text: 'View document' }] },
+  T([['203.0.113.50', { cat: 'c2', source: 'Feodo Tracker (abuse.ch) botnet C2 servers', matched: '203.0.113.50' }]]), 'c2');
+expectCat('C2 domain with label (C2IntelFeeds)', { links: [{ href: 'https://cdn-update.c2.example/x', text: 'Update' }] },
+  T([['cdn-update.c2.example', { cat: 'c2', source: 'C2IntelFeeds', label: 'Possible Cobalt Strike C2 Domain', matched: 'cdn-update.c2.example' }]]), 'c2');
+expectCat('Exact phishing URL on a shared host', { links: [{ href: 'https://sites.google.com/view/fake-login-page', text: 'Sign in' }] },
+  T([['url:sites.google.com/view/fake-login-page', { cat: 'phishing', source: 'OpenPhish', matched: 'sites.google.com/view/fake-login-page' }]]), 'phishing');
+expectCat('Sender domain on phishing list', { senderEmail: 'alerts@bank-verify.example' },
+  T([['bank-verify.example', { cat: 'phishing', source: 'CERT Polska warning list', matched: 'bank-verify.example' }]]), 'phishing');
+// clean lookup result (null) must not flag
+check('Lookup returned clean (null)', { senderName: 'News', senderEmail: 'news@site.example', subject: 'Read', body: 'An article you might like to read today.', links: [{ href: 'https://good.example/a', text: 'Read more' }] }, 'safe', T([['good.example', null]]));
+
+// ---------- real compiled list: index it like the background does and check for false positives ----------
+(async () => {
+  try {
+    const bundled = await (await fetch('../data/threat-intel.json')).json();
+    const extra = new Set([...PG_DATA.BRANDS.flatMap(b => b.domains), ...PG_DATA.FREE_MAIL, ...PG_DATA.TRACKING_DOMAINS]);
+    const idx = new Set(); let skipped = 0;
+    for (const s of bundled.sources) {
+      for (const h of s.hosts) PG_Intel.hostIsFlaggable(h, extra) ? idx.add(h) : skipped++;
+      for (const u of s.urls) idx.add('url:' + u);
+    }
+    const isBad = (host) => PG_Intel.hostAndParents(host).some(h => idx.has(h));
+    out.push(`\nINDEX: ${idx.size} entries from ${bundled.sources.length} sources (generated ${bundled.generated}); ${skipped} shared-platform entries kept URL-only`);
+    const popular = ['mail.google.com', 'www.google.com', 'drive.google.com', 'docs.google.com', 'github.com', 'raw.githubusercontent.com',
+      'www.dropbox.com', 'outlook.live.com', 'login.microsoftonline.com', 'onedrive.live.com', 'www.paypal.com', 'www.amazon.com', 'www.chase.com',
+      'www.bankofamerica.com', 'www.apple.com', 'www.facebook.com', 'www.linkedin.com', 'zoom.us', 'www.netflix.com', 'cdn.discordapp.com',
+      'discord.com', 't.me', 'bit.ly', 'www.youtube.com', 'en.wikipedia.org', 'vercel.app', 'blogspot.com', 's3.amazonaws.com', 'sendgrid.net',
+      'mail.yahoo.com', 'www.irs.gov', 'www.usps.com', 'www.fedex.com', 'www.ups.com', 'www.dhl.com', 'www.walmart.com', 'www.ebay.com'];
+    for (const h of popular) { const bad = isBad(h); bad ? fail++ : pass++; if (bad) out.push(`FAIL popular site flagged: ${h}`); }
+    out.push(`PASS-CHECK ${popular.length} popular legitimate sites: ${popular.filter(isBad).length} flagged`);
+    // every source should contribute, and a real listed entry from each must be found
+    for (const s of bundled.sources) {
+      const sample = s.hosts.find(h => PG_Intel.hostIsFlaggable(h, extra));
+      const ok = s.hosts.length > 0 && (!sample || isBad(sample)); ok ? pass++ : fail++;
+      out.push(`${ok ? 'PASS' : 'FAIL'} source ${s.id} (${s.category}): ${s.hosts.length} hosts, sample ${sample || '-'} detected=${sample ? isBad(sample) : '-'}`);
+    }
+  } catch (e) { fail++; out.push('FAIL could not load ../data/threat-intel.json: ' + e); }
+  out.unshift(`RESULT: ${pass} passed, ${fail} failed\n`);
+  document.getElementById('out').textContent = out.join('\n');
+})();
+</script></body></html>

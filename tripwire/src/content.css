@@ -1,0 +1,22 @@
+/* Inbox row highlights. !important is needed because webmail sites style rows heavily. */
+.pg-row-suspicious, .pg-row-suspicious > td {
+  background-color: #fff3b0 !important;
+  box-shadow: inset 5px 0 0 #e6a700 !important;
+}
+.pg-row-phishing, .pg-row-phishing > td {
+  background-color: #ffd0d0 !important;
+  box-shadow: inset 5px 0 0 #c62828 !important;
+}
+/* keep text readable even when the site is in dark mode */
+.pg-row-suspicious, .pg-row-suspicious *,
+.pg-row-phishing, .pg-row-phishing * { color: #1f2328 !important; }
+
+/* Risky links inside an opened email */
+a.pg-risky-link {
+  outline: 2px dashed #c62828 !important;
+  outline-offset: 2px;
+  background: rgba(198, 40, 40, 0.08) !important;
+  cursor: help !important;
+}
+
+.pg-banner-host { display: block; margin: 0 0 12px; }

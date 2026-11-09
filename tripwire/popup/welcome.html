@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Welcome to Tripwire</title>
+<style>
+  :root { --fg:#1f2328; --muted:#57606a; --bg:#fff; --soft:#f6f8fa; --line:#d8dee4; }
+  @media (prefers-color-scheme: dark) { :root { --fg:#e6edf3; --muted:#9da7b3; --bg:#0d1117; --soft:#161b22; --line:#30363d; } }
+  body { margin:0; font:16px/1.6 -apple-system,"Segoe UI",Roboto,Arial,sans-serif; color:var(--fg); background:var(--bg); }
+  main { max-width:720px; margin:0 auto; padding:40px 16px; }
+  h1 { font-size:28px; margin:0 0 4px; } h2 { font-size:19px; margin:28px 0 8px; }
+  .lockup { display:block; width:260px; max-width:100%; height:auto; margin:0 0 16px -14px; color:#2C2C2A; }
+  @media (prefers-color-scheme: dark) { .lockup { color:#e6edf3; } }
+  .lead { color:var(--muted); margin:0 0 24px; }
+  .card { border:1px solid var(--line); background:var(--soft); border-radius:10px; padding:14px 16px; margin:10px 0; }
+  .sw { display:inline-block; width:14px; height:14px; border-radius:3px; vertical-align:middle; margin-right:8px; }
+  ol li, ul li { margin:6px 0; }
+</style>
+</head>
+<body>
+<main>
+  <svg class="lockup" viewBox="0 0 440 140" role="img" aria-label="Tripwire">
+    <g transform="translate(72 70) scale(0.72)">
+      <circle r="40" fill="none" stroke="currentColor" stroke-width="7"/>
+      <circle r="21" fill="none" stroke="#888780" stroke-width="3.5" stroke-dasharray="6 6"/>
+      <line x1="-56" x2="56" stroke="#E24B4A" stroke-width="7" stroke-linecap="round"/>
+      <circle cx="-56" r="8" fill="#E24B4A"/><circle cx="56" r="8" fill="#E24B4A"/><circle r="10" fill="#E24B4A"/>
+    </g>
+    <text x="138" y="90" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="60" font-weight="500" fill="currentColor">Trip<tspan fill="#E24B4A">wire</tspan></text>
+  </svg>
+  <h1>Tripwire is on</h1>
+  <p class="lead">It quietly checks your emails for scams and warns you before you click something dangerous.</p>
+
+  <h2>How it works</h2>
+  <ol>
+    <li>Open your email in Chrome (Gmail, Outlook, Yahoo, and other webmail).</li>
+    <li>Risky emails in your inbox get coloured:
+      <div class="card"><span class="sw" style="background:#ffd0d0;border:2px solid #c62828"></span><b>Red</b>: known phishing, a confirmed scam.<br>
+      <span class="sw" style="background:#fff3b0;border:2px solid #e6a700"></span><b>Yellow</b>: suspicious, with warning signs but not confirmed. Be careful.</div></li>
+    <li>Open any email to see a <b>summary</b>, a <b>safety score from 0 to 100</b> (100 = safe), and <b>the reasons</b> it was flagged.</li>
+    <li>If you click a dangerous link, Tripwire stops you first and shows where the link really goes.</li>
+  </ol>
+
+  <h2>Your privacy</h2>
+  <div class="card">Emails are checked <b>on your own computer</b>. Your email content is never uploaded, stored or shared. The only thing downloaded is a public list of known scam websites.</div>
+
+  <h2>Using a different email website?</h2>
+  <p>Click the Tripwire icon in Chrome's toolbar while your email is open, then press <b>"Check emails on this site"</b>.</p>
+
+  <h2>Five habits that stop most scams</h2>
+  <ul>
+    <li><b>Check the sender's full address</b>, not just the name.</li>
+    <li><b>Hover over links</b> before clicking to see the real destination.</li>
+    <li><b>Never share passwords or codes</b> by email. Real companies don't ask.</li>
+    <li><b>Slow down</b> when an email is urgent or scary. That's the trick.</li>
+    <li><b>Report, don't just ignore</b>. It helps protect everyone.</li>
+  </ul>
+</main>
+</body>
+</html>
