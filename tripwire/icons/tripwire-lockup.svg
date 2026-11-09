@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 440 140" width="440" height="140" role="img">
+  <title>Tripwire logo</title>
+  <g transform="translate(72 70) scale(0.72)">
+    <circle cx="0" cy="0" r="40" fill="none" stroke="#2C2C2A" stroke-width="7"/>
+    <circle cx="0" cy="0" r="21" fill="none" stroke="#888780" stroke-width="3.5" stroke-dasharray="6 6"/>
+    <line x1="-56" y1="0" x2="56" y2="0" stroke="#E24B4A" stroke-width="7" stroke-linecap="round"/>
+    <circle cx="-56" cy="0" r="8" fill="#E24B4A"/>
+    <circle cx="56" cy="0" r="8" fill="#E24B4A"/>
+    <circle cx="0" cy="0" r="10" fill="#E24B4A"/>
+  </g>
+  <text x="138" y="90" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="60" font-weight="500" fill="#2C2C2A">Trip<tspan fill="#E24B4A">wire</tspan></text>
+</svg>

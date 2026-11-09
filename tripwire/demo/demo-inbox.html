@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Inbox — Demo Mail</title>
+<style>
+  body { margin:0; font:14px/1.5 Arial, sans-serif; color:#202124; background:#f6f8fc; display:grid; grid-template-columns:180px 1fr; height:100vh; }
+  nav { padding:16px; } nav b { display:block; padding:6px 10px; background:#d3e3fd; border-radius:16px; }
+  .wrap { display:grid; grid-template-rows:auto 1fr; overflow:hidden; background:#fff; border-radius:12px 0 0 0; }
+  [role="listbox"] { border-bottom:1px solid #ddd; max-height:45vh; overflow:auto; }
+  [role="option"] { display:grid; grid-template-columns:220px 1fr; gap:12px; padding:9px 16px; border-bottom:1px solid #eee; cursor:pointer; }
+  [role="option"]:hover { box-shadow: inset 0 -1px 0 #ccc; }
+  .sender { font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .snip { color:#5f6368; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  [role="main"] { padding:20px 28px; overflow:auto; }
+  .hdr .from { color:#5f6368; } h2 { margin:0 0 6px; font-weight:400; font-size:22px; }
+  .btn { display:inline-block; background:#1a73e8; color:#fff; padding:10px 18px; border-radius:4px; text-decoration:none; }
+</style>
+</head>
+<body>
+<nav><b>Inbox</b><p style="padding:6px 10px;color:#5f6368">Demo mailbox for testing Tripwire. All emails are fake; links point to harmless .example or real company addresses.</p></nav>
+<div class="wrap">
+  <div role="listbox" id="list"></div>
+  <div role="main" id="view"><p style="color:#5f6368">Select an email to read it.</p></div>
+</div>
+<script>
+const EMAILS = [
+  { name: 'PayPal', email: 'service@paypa1-security.com', subject: 'Your account has been limited',
+    body: `<p>Dear Customer,</p><p>We noticed unusual activity on your PayPal account. Your account has been limited and will be closed within 24 hours unless you verify your account.</p><p>Please confirm your password and billing information immediately to restore access.</p><p><a class="btn" href="http://paypa1-security.com/login">Log in to PayPal</a></p><p>Visit <a href="http://198.51.100.23/secure">www.paypal.com</a> for more help.</p><p>PayPal Security Team</p>` },
+  { name: 'Microsoft 365 Support', email: 'it.helpdesk.office365@gmail.com', subject: 'ACTION REQUIRED: Password expires today',
+    body: `<p>Dear user,</p><p>Your Office 365 password expires today. Failure to verify will result in your mailbox being disabled.</p><p>Click below to keep your current password. You will need to enter your password to confirm.</p><p><a class="btn" href="https://bit.ly/3xYz-o365">Keep my password</a></p>` },
+  { name: 'Mark (CEO)', email: 'mark.ceo.office@outlook.com', subject: 'Quick favor',
+    body: `<p>Hi,</p><p>Are you available? I need a favor. I'm in a meeting and can't talk. I need you to buy 5 gift cards for a client today, keep this confidential.</p><p>Reply with the codes as soon as possible.</p><p>Mark</p>` },
+  { name: 'Amazon.com', email: 'shipment-tracking@amazon.com', subject: 'Your order has shipped',
+    body: `<p>Hello Jordan,</p><p>Your order of "USB-C Charging Cable (2-pack)" has shipped and should arrive on Thursday.</p><p>You can track your package anytime from Your Orders.</p><p><a class="btn" href="https://www.amazon.com/gp/your-account/order-history">View your order</a></p><p>Thanks for shopping with us.</p>` },
+  { name: 'Sarah Kim', email: 'sarah.kim@acme-design.example', subject: 'Notes from today\'s meeting',
+    body: `<p>Hi team,</p><p>Thanks for a great meeting today. I've put the notes and next steps in the shared doc so we can review them before Friday.</p><p>The main decisions were to move the launch to March and to hire one more designer.</p><p><a href="https://docs.google.com/document/d/example">Meeting notes</a></p><p>Sarah</p>` },
+  { name: 'DHL Express', email: 'noreply@dhl-delivery-notice.top', subject: 'Package on hold: delivery fee unpaid',
+    body: `<p>Dear Customer,</p><p>Your package could not be delivered because a processing fee of $1.99 is unpaid. Pay the fee within 48 hours or your package will be returned.</p><p><a class="btn" href="https://dhl.com.redelivery-fee.top/pay">Pay now</a></p>` },
+  { name: 'Netflix', email: 'info@mailer.netflix.com', subject: 'New on Netflix this week',
+    body: `<p>Hi Jordan,</p><p>Here are the new shows and movies added this week that we think you'll love. Don't miss the season finale streaming now.</p><p><a href="https://www.netflix.com/browse">Start watching</a></p>` },
+];
+const list = document.getElementById('list'), view = document.getElementById('view');
+EMAILS.forEach((m, i) => {
+  const row = document.createElement('div');
+  row.setAttribute('role', 'option');
+  row.innerHTML = `<span class="sender" title="${m.email}">${m.name}</span><span><span class="subject">${m.subject}</span> <span class="snip">— ${m.body.replace(/<[^>]+>/g, ' ').slice(0, 90)}</span></span>`;
+  row.onclick = () => {
+    view.innerHTML = `<div class="hdr"><h2 class="subject">${m.subject}</h2><div class="from"><b>${m.name}</b> <span>&lt;${m.email}&gt;</span></div></div><hr><div class="email-body">${m.body}</div>`;
+  };
+  list.append(row);
+});
+</script>
+</body>
+</html>
