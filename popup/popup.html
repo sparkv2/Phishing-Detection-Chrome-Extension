@@ -66,7 +66,9 @@
     <p class="muted">Every email is checked <b>on your computer</b>. Email content is never sent, saved or shared. Only counts and your own trusted/reported lists are stored, on this device.</p>
     <p class="muted" id="feedInfo">Loading threat lists…</p>
     <ul id="intelList" class="list intel"></ul>
-    <label class="row"><input type="checkbox" id="useFeed"> Keep these lists up to date automatically (downloads public lists twice a day; sends nothing about you)</label>
+    <label class="row"><input type="checkbox" id="useFeed"> Keep these lists up to date automatically (downloads the list from the Tripwire server, or the public lists if it's down; sends nothing about you)</label>
+    <label class="row"><input type="checkbox" id="communityEnabled"> Warn about domains other Tripwire users reported (shown as yellow, never as confirmed)</label>
+    <label class="row"><input type="checkbox" id="shareReports"> Share my reports anonymously: when I report an email, send only a fingerprint of the fake domain. Never the email, the address or anything about me. <span class="muted">Off unless you turn it on.</span></label>
     <button id="feedBtn" class="btn small">Update lists now</button>
   </details>
 

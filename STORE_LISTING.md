@@ -37,7 +37,8 @@ Detect phishing and fraud in webmail and warn the user before they act on it.
 | `webRequest` | Reads the redirect header from link shorteners (bit.ly…) so a short link can be judged by its destination without opening it. |
 | `offscreen` | Runs Chrome's built-in on-device AI model (optional feature). The Prompt API isn't available in service workers. |
 | Host: webmail sites (content script) | Reads the emails the user opens in order to check them. |
-| Host: openphish.com, gitlab.io, github, cert.pl, abuse.ch | Downloads public threat lists. Nothing is uploaded. |
+| Host: tripwire.sparkv2.com | The Tripwire server: downloads the threat list and the community reports list. Uploads only opt-in report fingerprints. |
+| Host: openphish.com, gitlab.io, github, cert.pl, abuse.ch | Fallback: downloads the public threat lists directly if the Tripwire server is down. Nothing is uploaded. |
 | Host: googleusercontent.com, mail.google.com | Re-reads images shown in an email to decode QR codes, on the device. |
 | Host: link shorteners | Asks the shortener where a link goes (see `webRequest`). |
 | Optional: all sites | Requested only if the user turns on "Protect the pages I open" or enables an extra webmail site. |
@@ -48,7 +49,7 @@ https://github.com/sparkv2/Phishing-Detection-Chrome-Extension/blob/main/PRIVACY
 ## Privacy practices (data disclosure form)
 - Does not collect or transmit personal data, email content, browsing history or authentication information.
 - Data stays on the device: settings, counts, trusted and reported lists, salted hashes of past senders, and (if password alert is on) a 4-byte fragment of a slow salted hash of the user's email password.
-- Network requests: public threat-list downloads, shortener redirect lookups for links the user clicks, and re-fetching images already shown in an email.
+- Network requests: threat-list and community-list downloads (from the Tripwire server, with the public feeds as a fallback), opt-in report fingerprints, shortener redirect lookups for links the user clicks, and re-fetching images already shown in an email.
 - No ads, no analytics, no remote code.
 
 ## Screenshots to prepare (1280×800)

@@ -1,0 +1,50 @@
+[Unit]
+Description=Tripwire community server (behind Cloudflare Tunnel)
+After=network.target
+
+[Service]
+Type=simple
+User=tripwire
+Group=tripwire
+ExecStart=/usr/bin/node /opt/tripwire/server/tripwire-server.mjs
+Environment=NODE_ENV=production PORT=8787 HOST=127.0.0.1 REPORT_THRESHOLD=3 NODE_NO_WARNINGS=1
+StateDirectory=tripwire
+StateDirectoryMode=0750
+Restart=on-failure
+RestartSec=5
+
+# Network: only localhost (cloudflared connects from 127.0.0.1). No outbound internet at all.
+IPAddressDeny=any
+IPAddressAllow=localhost
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+
+# Sandbox
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ReadWritePaths=/var/lib/tripwire
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+ProcSubset=pid
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+UMask=0077
+MemoryMax=300M
+TasksMax=64
+
+[Install]
+WantedBy=multi-user.target

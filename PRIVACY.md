@@ -1,12 +1,13 @@
 # Tripwire privacy policy
 
-**Effective date:** 18 November 2026 · Applies to Tripwire version 1.2.0 and later, for Chrome, Edge and Firefox.
+**Effective date:** 18 November 2026 · Applies to Tripwire version 1.3.0 and later, for Chrome, Edge and Firefox.
 
 Tripwire is a browser extension that checks your email for phishing and scams. It was built so that your email never leaves your computer. This policy explains exactly what Tripwire does with data.
 
 ## The short version
 - Tripwire checks your emails **on your own device**. Email content is never uploaded, sold, shared or stored.
-- Tripwire has **no servers** of its own. It doesn't collect analytics, show ads or track you.
+- Tripwire's own server (`tripwire.sparkv2.com`) only hands out lists of dangerous sites. It receives something from you only if you turn on **Share my reports**, and even then only a fingerprint of a scam domain.
+- It doesn't collect analytics, show ads or track you.
 - The little that Tripwire saves stays on your device, in the browser's extension storage, and you can delete it at any time.
 
 ## What Tripwire reads
@@ -32,17 +33,24 @@ Tripwire keeps a few things in memory only, never saved: which links in an open 
 ## When Tripwire uses the internet
 Tripwire makes only these network requests. None of them contain your email content or anything that identifies you.
 
-1. **Threat-list updates.** About twice a day it downloads public lists of known phishing, malware and botnet sites from OpenPhish, GitLab/GitHub (phishing-filter, urlhaus-filter, botnet-filter, C2IntelFeeds), CERT Polska and abuse.ch. These are ordinary downloads. Nothing is uploaded. *You can turn this off in the popup.*
-2. **Shortened links.** When you click a shortened link (bit.ly and similar), Tripwire asks that link service where the link leads, without opening the destination page. The link service sees the request, as it would if you clicked the link. *You can turn this off in the popup.*
-3. **Gmail headers and attachments.** On Gmail, Tripwire asks Gmail for an email's technical headers and for the text of HTML attachments. These requests go only to Gmail, which already holds this data.
-4. **Images, for QR codes.** Tripwire downloads images that are already shown in an email again, so it can look for QR codes in them. These requests go to wherever the image is hosted (for Gmail, Google's image servers), just as when the email first displayed it.
+1. **Threat-list updates.** About twice a day it downloads the list of known phishing, malware and botnet sites from the Tripwire server (`tripwire.sparkv2.com`), which rebuilds it every 6 hours from public sources. If the server can't be reached, it downloads the same public lists directly from OpenPhish, GitLab/GitHub (phishing-filter, urlhaus-filter, botnet-filter, C2IntelFeeds), CERT Polska and abuse.ch. These are ordinary downloads. Nothing is uploaded. *You can turn this off in the popup.*
+2. **Community reports list.** With the same updates, it downloads the list of fingerprints of domains that at least 3 different Tripwire users reported. A domain on it gets a yellow warning, never a "confirmed scam" label. Nothing is uploaded. *You can turn this off in the popup.*
+3. **Sharing your reports (off unless you turn it on).** If you turn on **Share my reports anonymously** and click "Report phishing", Tripwire sends the server one value: a SHA-256 fingerprint of the scam email's domain (for example, of `paypa1-security.com`). It never sends the email, its content, the sender's address, your address or anything about you. Domains of shared email providers, such as gmail.com, are never sent.
+4. **Shortened links.** When you click a shortened link (bit.ly and similar), Tripwire asks that link service where the link leads, without opening the destination page. The link service sees the request, as it would if you clicked the link. *You can turn this off in the popup.*
+5. **Gmail headers and attachments.** On Gmail, Tripwire asks Gmail for an email's technical headers and for the text of HTML attachments. These requests go only to Gmail, which already holds this data.
+6. **Images, for QR codes.** Tripwire downloads images that are already shown in an email again, so it can look for QR codes in them. These requests go to wherever the image is hosted (for Gmail, Google's image servers), just as when the email first displayed it.
+
+### What the Tripwire server keeps
+- **For shared reports:** the domain fingerprint, the day it was reported, and a scrambled code for the reporter's *network* (an HMAC with a secret key of the first three parts of the IP address, like `203.0.113.x`). The code only lets the server count how many *different* networks reported a domain, and limit each network to 50 reports a day. It can't be turned back into an IP address, and your full IP address is never stored. Reports are deleted after 90 days.
+- **For downloads:** nothing. The server doesn't log requests.
+- The server is reached through Cloudflare, which handles the connection and may keep its own short-term technical logs under [Cloudflare's privacy policy](https://www.cloudflare.com/privacypolicy/).
 
 The optional on-device AI uses the language model built into Chrome. It runs on your computer and sends nothing over the network. The first time you turn it on, Chrome may download the model from Google.
 
 ## What Tripwire never does
 - It never sends your email content, contacts, browsing history or passwords to anyone.
 - It doesn't sell, rent or share data, and it doesn't use data for advertising or credit decisions.
-- It doesn't run code downloaded from the internet. All of its code ships inside the extension.
+- It doesn't run code downloaded from the internet. All of its code ships inside the extension. The server sends only data (lists), never code.
 - It has no accounts and no sign-up.
 
 ## Permissions
@@ -53,7 +61,7 @@ The optional on-device AI uses the language model built into Chrome. It runs on 
 The full list of permissions, with the reason for each, is in [STORE_LISTING.md](STORE_LISTING.md).
 
 ## Your choices
-- **Turn features off:** use the popup to switch off protection, list updates, shortened-link checks, page protection, password alert or the on-device AI.
+- **Turn features off:** use the popup to switch off protection, list updates, community warnings, report sharing, shortened-link checks, page protection, password alert or the on-device AI.
 - **Remove saved senders:** clear your trusted and reported senders from the popup.
 - **Delete everything:** remove Tripwire from the browser. This deletes everything it stored on your device.
 
