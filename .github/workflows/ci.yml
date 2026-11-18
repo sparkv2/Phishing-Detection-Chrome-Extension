@@ -3,12 +3,16 @@ on:
   push:
   pull_request:
 
+permissions:
+  contents: read
+
+# Actions are pinned to exact commits (not movable version tags), so a hijacked tag can't change what runs here.
 jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
       - name: Syntax-check every script
@@ -17,7 +21,7 @@ jobs:
         run: npm test
       - name: Build store packages
         run: npm run package
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: tripwire-packages
           path: dist/*.zip

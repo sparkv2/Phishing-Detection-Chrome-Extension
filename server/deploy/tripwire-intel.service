@@ -1,5 +1,5 @@
 [Unit]
-Description=Rebuild the Tripwire threat list from the public feeds
+Description=Fetch and verify the signed Tripwire threat list from GitHub
 After=network-online.target
 Wants=network-online.target
 
@@ -7,12 +7,13 @@ Wants=network-online.target
 Type=oneshot
 User=tripwire
 Group=tripwire
-ExecStart=/usr/bin/node /opt/tripwire/tools/build-threat-intel.mjs --out /var/lib/tripwire/intel
+ExecStart=/usr/bin/node /opt/tripwire/server/fetch-intel.mjs
 Environment=NODE_NO_WARNINGS=1
 StateDirectory=tripwire
-TimeoutStartSec=15min
+TimeoutStartSec=5min
 
-# Needs outbound HTTPS to download feeds; nothing else.
+# Needs outbound HTTPS to GitHub; never the home network.
+IPAddressDeny=10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 169.254.0.0/16 100.64.0.0/10 fc00::/7 fe80::/10
 RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
 NoNewPrivileges=yes
 CapabilityBoundingSet=

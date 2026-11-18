@@ -2,7 +2,7 @@
 'use strict';
 const { test, before, after } = require('node:test');
 const assert = require('node:assert/strict');
-const { spawn } = require('node:child_process');
+const { spawn, spawnSync } = require('node:child_process');
 const { mkdtempSync, rmSync, mkdirSync, copyFileSync } = require('node:fs');
 const { tmpdir } = require('node:os');
 const { join } = require('node:path');
@@ -21,7 +21,7 @@ before(async () => {
   mkdirSync(join(state, 'intel'));
   copyFileSync(join(root, 'data/threat-intel.bin'), join(state, 'intel/threat-intel.bin'));
   proc = spawn(process.execPath, [join(root, 'server/tripwire-server.mjs')], { env: Object.assign({}, process.env, {
-    PORT: String(PORT), STATE_DIRECTORY: state, NODE_NO_WARNINGS: '1', ELECTRON_RUN_AS_NODE: '1', COMMUNITY_CACHE_MS: '0' }), stdio: 'ignore' });
+    PORT: String(PORT), STATE_DIRECTORY: state, NODE_NO_WARNINGS: '1', ELECTRON_RUN_AS_NODE: '1', COMMUNITY_CACHE_MS: '0', REPORT_MIN_AGE_DAYS: '0' }), stdio: 'ignore' });
   for (let i = 0; i < 50; i++) { try { if ((await fetch(base + '/v1/health')).ok) return; } catch (e) { /* starting */ } await new Promise((r) => setTimeout(r, 100)); }
   throw new Error('server did not start');
 });
@@ -47,6 +47,26 @@ test('a domain is published only after 3 different networks report it', async ()
   list = await (await fetch(base + '/v1/community.json')).json();
   assert.ok(list.hashes.includes(h), 'not published after 3 networks');
   assert.equal(list.threshold, 3);
+});
+
+test('IPv6 reporters in the same /32 count as one network', async () => {
+  const h = fp('v6-test.example');
+  await report([h], '2001:db8:aaaa::1');
+  await report([h], '2001:db8:bbbb::1'); // different /48, same /32
+  await report([h], '203.0.113.200');
+  const list = await (await fetch(base + '/v1/community.json')).json();
+  assert.ok(!list.hashes.includes(h), 'two /48s in one /32 were counted twice');
+});
+
+test('admin can suppress a falsely reported domain', async () => {
+  const h = fp('good-bakery.example');
+  for (const ip of ['198.18.1.1', '198.18.2.1', '198.18.3.1']) await report([h], ip);
+  assert.ok((await (await fetch(base + '/v1/community.json')).json()).hashes.includes(h));
+  const r = spawnSync(process.execPath, [join(root, 'server/tripwire-admin.mjs'), 'suppress', 'good-bakery.example', 'test'],
+    { env: Object.assign({}, process.env, { STATE_DIRECTORY: state, NODE_NO_WARNINGS: '1', ELECTRON_RUN_AS_NODE: '1' }), encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stderr);
+  assert.ok(!(await (await fetch(base + '/v1/community.json')).json()).hashes.includes(h), 'still published after suppress');
+  assert.equal((await (await report([h], '198.18.4.1')).json()).accepted, 0, 'suppressed domain accepted new reports');
 });
 
 test('protected domains (brands, free mail, shared platforms) are never accepted', async () => {

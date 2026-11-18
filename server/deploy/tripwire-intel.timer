@@ -1,10 +1,10 @@
 [Unit]
-Description=Rebuild the Tripwire threat list every 6 hours
+Description=Fetch the signed Tripwire threat list every hour (GitHub Actions publishes a new one every 6 hours)
 
 [Timer]
 OnBootSec=2min
-OnUnitActiveSec=6h
-RandomizedDelaySec=10min
+OnUnitActiveSec=1h
+RandomizedDelaySec=5min
 Persistent=true
 
 [Install]

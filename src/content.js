@@ -458,7 +458,7 @@
   chrome.storage.onChanged.addListener(async (changes, area) => {
     if (area !== 'local') return;
     const keys = Object.keys(changes);
-    if (keys.every((k) => ['stats', 'signalCounts', 'senderHistory', 'health'].includes(k))) return;
+    if (keys.every((k) => ['stats', 'signalCounts', 'senderHistory', 'health', 'intelNewest'].includes(k))) return;
     if (keys.includes('intelUpdated')) threats.clear(); // threat lists were refreshed: re-check everything
     await loadState();
     resetAll();

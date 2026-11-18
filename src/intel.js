@@ -234,6 +234,47 @@
     return { entries, count: entries.length, skipped };
   }
 
-  root.PG_Intel = { SOURCES, SUBDOMAIN_PLATFORMS, PROTECTED, parseFeed, urlKeys, hostIsFlaggable, hostAndParents, hostFromLine, CATEGORY_TEXT,
+  // Host (or one of its parent domains) on the list? Protected hosts and parents are never matched as a whole,
+  // even if a list includes them. Returns { matched, desc } or null.
+  function lookupHost(idx, host, neverFlag) {
+    if (!hostIsFlaggable(host, neverFlag)) return null;
+    for (const h of hostAndParents(host)) {
+      if (!hostIsFlaggable(h, neverFlag)) return null; // e.g. vercel.app or a brand's domain above a subdomain
+      const d = lookupCompact(idx, h);
+      if (d >= 0) return { matched: h, desc: d };
+    }
+    return null;
+  }
+
+  // ---------- signed lists ----------
+  // The list the Tripwire server hands out is built and signed by the project's GitHub Actions (tools/sign-intel.mjs).
+  // Only this public key is shipped. The private key never touches the server, so taking over the server or the
+  // Cloudflare account can't forge a list: at worst it can withhold one, and then Tripwire falls back to the public feeds.
+  const SIGNING_PUBLIC_KEY = 'X/NMGsz5BIfnmzB6I2LZFCgCb9mxLVXj9yiv7EucimQ=';
+  const MAX_LIST_AGE_MS = 3 * 86400000; // an older "fresh" list is treated as withheld updates
+
+  const b64 = (s) => Uint8Array.from(atob(s.trim()), (c) => c.charCodeAt(0));
+  const hex = (buf) => [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
+
+  // metaBytes: ArrayBuffer/Uint8Array of meta.json exactly as downloaded; sig: base64 text; bin: ArrayBuffer.
+  // opts.notOlderThan: ISO date of the list currently in use (stops an attacker replaying an old signed list).
+  // Returns the parsed meta on success; throws with a reason otherwise.
+  async function verifyIntel(metaBytes, sig, bin, opts) {
+    opts = opts || {};
+    const subtle = (opts.crypto || root.crypto).subtle;
+    const key = await subtle.importKey('raw', b64(opts.publicKey || SIGNING_PUBLIC_KEY), { name: 'Ed25519' }, false, ['verify']);
+    if (!(await subtle.verify({ name: 'Ed25519' }, key, b64(sig), metaBytes))) throw new Error('bad signature');
+    const meta = JSON.parse(new TextDecoder().decode(metaBytes));
+    if (!meta.binSha256 || hex(await subtle.digest('SHA-256', bin)) !== meta.binSha256) throw new Error('list does not match its signed checksum');
+    const generated = Date.parse(meta.generated);
+    if (!(generated > 0)) throw new Error('no build date');
+    if (opts.notOlderThan && generated < Date.parse(opts.notOlderThan)) throw new Error('older than the list already in use');
+    if ((opts.now || Date.now()) - generated > MAX_LIST_AGE_MS) throw new Error('list is more than 3 days old');
+    const ab = bin instanceof ArrayBuffer ? bin : bin.buffer.slice(bin.byteOffset, bin.byteOffset + bin.byteLength);
+    if (parseCompact(ab).hi.length !== meta.total) throw new Error('entry count mismatch');
+    return meta;
+  }
+
+  root.PG_Intel = { SIGNING_PUBLIC_KEY, verifyIntel, lookupHost, SOURCES, SUBDOMAIN_PLATFORMS, PROTECTED, parseFeed, urlKeys, hostIsFlaggable, hostAndParents, hostFromLine, CATEGORY_TEXT,
     hash53, buildCompact, serializeCompact, parseCompact, lookupCompact, compactRecords, mergeCompact, sourceEntries };
 })(typeof globalThis !== 'undefined' ? globalThis : this);

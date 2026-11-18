@@ -13,7 +13,8 @@ id tripwire >/dev/null 2>&1 || useradd --system --home-dir /var/lib/tripwire --s
 install -d -o root -g root -m 0755 /opt/tripwire /opt/tripwire/src /opt/tripwire/tools /opt/tripwire/server
 install -o root -g root -m 0644 "$SRC"/src/data.js "$SRC"/src/analyzer.js "$SRC"/src/intel.js /opt/tripwire/src/
 install -o root -g root -m 0644 "$SRC"/tools/build-threat-intel.mjs /opt/tripwire/tools/
-install -o root -g root -m 0644 "$SRC"/server/tripwire-server.mjs /opt/tripwire/server/
+install -o root -g root -m 0644 "$SRC"/server/tripwire-server.mjs "$SRC"/server/db.mjs "$SRC"/server/fetch-intel.mjs \
+  "$SRC"/server/tripwire-admin.mjs /opt/tripwire/server/
 install -o root -g root -m 0644 "$SRC"/server/deploy/tripwire-server.service "$SRC"/server/deploy/tripwire-intel.service \
   "$SRC"/server/deploy/tripwire-intel.timer /etc/systemd/system/
 
