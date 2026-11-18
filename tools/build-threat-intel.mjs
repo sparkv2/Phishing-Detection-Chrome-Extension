@@ -9,6 +9,7 @@
 //
 // Feed parsing and the shared-platform filter come from src/intel.js, the same code the extension's live updater uses.
 import { createRequire } from 'node:module';
+import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync, mkdirSync, renameSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -35,7 +36,7 @@ async function download(source) {
   return null;
 }
 
-let parsedById = {}, generated = new Date().toISOString().replace(/\.\d+Z$/, 'Z');
+let parsedById = {}, generated = new Date().toISOString().replace(/\.\d+Z$/, 'Z'); // ISO date; signed lists older than 3 days are refused
 if (fromJson) {
   const old = JSON.parse(readFileSync(fromJson, 'utf8'));
   generated = old.generated || generated;
@@ -73,8 +74,10 @@ if (!sources.length) { console.error('No sources could be loaded; leaving the ex
 const idx = I.buildCompact(allEntries);
 mkdirSync(outDir, { recursive: true });
 // Write to temporary names, then rename, so a reader never sees a half-written file.
-writeFileSync(join(outDir, 'threat-intel.bin.tmp'), I.serializeCompact(idx));
-writeFileSync(join(outDir, 'threat-intel.meta.json.tmp'), JSON.stringify({ format: 1, generated, total: idx.hi.length, descs, sources }, null, 1) + '\n');
+const binBytes = I.serializeCompact(idx);
+const binSha256 = createHash('sha256').update(binBytes).digest('hex'); // tools/sign-intel.mjs signs meta.json, which pins this
+writeFileSync(join(outDir, 'threat-intel.bin.tmp'), binBytes);
+writeFileSync(join(outDir, 'threat-intel.meta.json.tmp'), JSON.stringify({ format: 1, generated, total: idx.hi.length, binSha256, descs, sources }, null, 1) + '\n');
 renameSync(join(outDir, 'threat-intel.bin.tmp'), join(outDir, 'threat-intel.bin'));
 renameSync(join(outDir, 'threat-intel.meta.json.tmp'), join(outDir, 'threat-intel.meta.json'));
 

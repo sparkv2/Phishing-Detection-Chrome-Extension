@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.3.1 (2026-11-18): security hardening
+- **Signed threat list.** GitHub Actions builds and signs the list every 6 hours. The server and the extension only accept it with a valid Ed25519 signature, a matching checksum, and a date that is newer than the current list and less than 3 days old. The signing key never touches the server.
+- **The extension never flags protected sites** (brands, free mail, trackers, shared platforms) as a whole, even if a downloaded list includes them.
+- **Community reports are harder to fake.** IPv6 reporters are grouped by /32 instead of /48, a domain's first report must be a day old before it's published, and the store is capped at 500,000 reports. An admin tool (`server/tripwire-admin.mjs`) can check, suppress and restore domains.
+- **Server network isolation.** The server can no longer open connections into the home network. `cloudflared` runs as an unprivileged, sandboxed user that can't reach private addresses either.
+- GitHub Actions are pinned to exact commits.
+
 ## 1.3.0 (2026-11-18)
 - **Tripwire server** at `tripwire.sparkv2.com` (see `server/`). Live list updates now download one compact file from the server, which rebuilds it from the public feeds every 6 hours. If the server is down, the extension downloads the feeds directly, as before.
 - **Community reports.** An opt-in setting, **Share my reports anonymously**, sends a SHA-256 fingerprint of a reported scam domain, and nothing else. Domains reported from 3 or more different networks get a yellow warning for every Tripwire user. They're never shown as a confirmed (red) scam.

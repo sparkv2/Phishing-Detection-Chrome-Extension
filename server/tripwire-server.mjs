@@ -1,82 +1,38 @@
 #!/usr/bin/env node
 // Tripwire community server. Node 22+, no dependencies.
 //
-//   GET  /v1/health                      -> { ok: true }
-//   GET  /v1/intel/threat-intel.bin      -> compact threat list (rebuilt from the public feeds by tripwire-intel.timer)
-//   GET  /v1/intel/threat-intel.meta.json
-//   GET  /v1/community.json              -> fingerprints of domains reported by at least THRESHOLD different networks
+//   GET  /v1/health                          -> { ok: true }
+//   GET  /v1/intel/threat-intel.bin          -> compact threat list, built and signed by GitHub Actions,
+//   GET  /v1/intel/threat-intel.meta.json        verified here by tripwire-intel.service before it is served
+//   GET  /v1/intel/threat-intel.meta.json.sig
+//   GET  /v1/community.json                  -> fingerprints of domains reported by enough different networks
 //   POST /v1/reports  { v: 1, hashes: ["<64 hex>", ...] }   (opt-in, from extensions)
 //
-// Privacy: a report is only a SHA-256 fingerprint of a registrable domain ("tripwire-report-v1|" + domain), never an
-// email, address or URL. The reporter's IP is not stored: only an HMAC of its /24 (IPv4) or /48 (IPv6) network, used
-// to count *different* reporters, and it is deleted with the report after RETENTION_DAYS.
-// Runs behind Cloudflare Tunnel on 127.0.0.1 only; the systemd unit forbids any other network access.
+// Privacy: a report is only a SHA-256 fingerprint of a registrable domain ("tripwire-report-v1|" + domain). The
+// reporter's IP is never stored: only an HMAC of its network, used to count *different* reporters. Reports are
+// deleted after 90 days. Runs behind Cloudflare Tunnel on 127.0.0.1; the systemd unit forbids other network access.
 import { createServer } from 'node:http';
-import { createHmac, randomBytes, createHash } from 'node:crypto';
-import { readFileSync, existsSync, writeFileSync, statSync, mkdirSync } from 'node:fs';
-import { join, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { createRequire } from 'node:module';
-import { DatabaseSync } from 'node:sqlite';
+import { readFileSync, existsSync, statSync } from 'node:fs';
+import { join } from 'node:path';
+import { STATE, THRESHOLD, MAX_REPORTS_PER_NET_PER_DAY, MAX_ROWS, HASH_PREFIX, PROTECTED, today, openDb, publishable } from './db.mjs';
 
 const PORT = Number(process.env.PORT || 8787);
 const HOST = process.env.HOST || '127.0.0.1';
-const STATE = process.env.STATE_DIRECTORY || '/var/lib/tripwire';
 const INTEL_DIR = process.env.INTEL_DIR || join(STATE, 'intel');
-const THRESHOLD = Number(process.env.REPORT_THRESHOLD || 3); // distinct networks before a domain is published
-const RETENTION_DAYS = 90;
 const CACHE_MS = Number(process.env.COMMUNITY_CACHE_MS ?? 10 * 60 * 1000);
-const MAX_REPORTS_PER_NET_PER_DAY = 50;
-const HASH_PREFIX = 'tripwire-report-v1|';
 const ALLOWED_ORIGIN = /^chrome-extension:\/\/[a-p]{32}$|^moz-extension:\/\/[0-9a-f-]{36}$|^extension:\/\//;
 
-// ---------- shared data from the extension: never accept reports for big brands, free mail, shared platforms ----------
-const root = join(dirname(fileURLToPath(import.meta.url)), '..');
-const require = createRequire(import.meta.url);
-for (const f of ['src/data.js', 'src/analyzer.js', 'src/intel.js']) require(join(root, f));
-const D = globalThis.PG_DATA, I = globalThis.PG_Intel;
-const fingerprint = (domain) => createHash('sha256').update(HASH_PREFIX + domain).digest('hex');
-const PROTECTED = new Set([...D.BRANDS.flatMap((b) => b.domains), ...D.FREE_MAIL, ...D.TRACKING_DOMAINS, ...D.SHORTENERS,
-  ...I.PROTECTED, ...I.SUBDOMAIN_PLATFORMS].map(fingerprint));
-
-// ---------- storage ----------
-mkdirSync(STATE, { recursive: true });
-const secretFile = join(STATE, 'hmac.key');
-if (!existsSync(secretFile)) writeFileSync(secretFile, randomBytes(32), { mode: 0o600 });
-const SECRET = readFileSync(secretFile);
-const db = new DatabaseSync(join(STATE, 'reports.db'));
-db.exec(`PRAGMA journal_mode = WAL;
-  CREATE TABLE IF NOT EXISTS reports (hash TEXT NOT NULL, net TEXT NOT NULL, day INTEGER NOT NULL, PRIMARY KEY (hash, net));
-  CREATE INDEX IF NOT EXISTS reports_day ON reports(day);
-  CREATE TABLE IF NOT EXISTS usage (net TEXT NOT NULL, day INTEGER NOT NULL, n INTEGER NOT NULL, PRIMARY KEY (net, day));`);
-const q = {
-  insert: db.prepare('INSERT INTO reports (hash, net, day) VALUES (?, ?, ?) ON CONFLICT(hash, net) DO UPDATE SET day = excluded.day'),
-  usage: db.prepare('SELECT n FROM usage WHERE net = ? AND day = ?'),
-  bump: db.prepare('INSERT INTO usage (net, day, n) VALUES (?, ?, ?) ON CONFLICT(net, day) DO UPDATE SET n = n + excluded.n'),
-  published: db.prepare('SELECT hash, COUNT(*) AS c FROM reports GROUP BY hash HAVING c >= ? ORDER BY hash'),
-  prune: db.prepare('DELETE FROM reports WHERE day < ?'),
-  pruneUsage: db.prepare('DELETE FROM usage WHERE day < ?'),
-};
-const today = () => Math.floor(Date.now() / 86400000);
-
-function networkOf(ip) {
-  ip = (ip || '').replace(/^::ffff:/, '');
-  if (/^\d+\.\d+\.\d+\.\d+$/.test(ip)) return ip.split('.').slice(0, 3).join('.') + '.0/24';
-  if (ip.includes(':')) return ip.split(':').slice(0, 3).join(':') + '::/48';
-  return 'unknown';
-}
-const netKey = (ip) => createHmac('sha256', SECRET).update(networkOf(ip)).digest('hex').slice(0, 32);
+const { q, netKey } = openDb();
 
 let communityCache = null;
 function community() {
   if (communityCache && Date.now() - communityCache.at < CACHE_MS) return communityCache.body;
-  q.prune.run(today() - RETENTION_DAYS);
-  q.pruneUsage.run(today() - 2);
-  const hashes = q.published.all(THRESHOLD).map((r) => r.hash).filter((h) => !PROTECTED.has(h));
-  const body = JSON.stringify({ v: 1, generated: new Date().toISOString(), threshold: THRESHOLD, prefix: HASH_PREFIX, hashes });
+  const body = JSON.stringify({ v: 1, generated: new Date().toISOString(), threshold: THRESHOLD, prefix: HASH_PREFIX, hashes: publishable(q) });
   communityCache = { at: Date.now(), body };
   return body;
 }
+let rowCount = { at: 0, n: 0 };
+const rows = () => { if (Date.now() - rowCount.at > 60000) rowCount = { at: Date.now(), n: q.rows.get().n }; return rowCount.n; };
 
 // ---------- http ----------
 function send(res, status, body, headers) {
@@ -98,7 +54,8 @@ function readBody(req, limit) {
   });
 }
 
-const INTEL_FILES = { 'threat-intel.bin': 'application/octet-stream', 'threat-intel.meta.json': 'application/json; charset=utf-8' };
+const INTEL_FILES = { 'threat-intel.bin': 'application/octet-stream', 'threat-intel.meta.json': 'application/json; charset=utf-8',
+  'threat-intel.meta.json.sig': 'text/plain; charset=utf-8' };
 
 const server = createServer(async (req, res) => {
   const url = new URL(req.url, 'http://x');
@@ -123,13 +80,17 @@ const server = createServer(async (req, res) => {
       const body = JSON.parse(await readBody(req, 4096));
       const hashes = [...new Set(Array.isArray(body.hashes) ? body.hashes : [])].filter((h) => /^[0-9a-f]{64}$/.test(h)).slice(0, 20);
       if (body.v !== 1 || !hashes.length) return send(res, 400, { error: 'bad request' }, extra);
-      // Behind Cloudflare Tunnel every request arrives from localhost; the real client IP is in CF-Connecting-IP.
+      // Behind Cloudflare Tunnel every request arrives from localhost; Cloudflare sets the real client IP in CF-Connecting-IP.
       const net = netKey(req.headers['cf-connecting-ip'] || req.socket.remoteAddress);
       const used = (q.usage.get(net, today()) || {}).n || 0;
       if (used + hashes.length > MAX_REPORTS_PER_NET_PER_DAY) return send(res, 429, { error: 'too many reports today' }, extra);
       q.bump.run(net, today(), hashes.length);
       let accepted = 0;
-      for (const h of hashes) { if (PROTECTED.has(h)) continue; q.insert.run(h, net, today()); accepted++; }
+      for (const h of hashes) {
+        if (PROTECTED.has(h) || q.isSuppressed.get(h)) continue;
+        if (!q.exists.get(h, net) && rows() >= MAX_ROWS) return send(res, 503, { error: 'report store is full', accepted }, extra);
+        q.insert.run(h, net, today()); q.firstSeen.run(h, today()); accepted++; rowCount.n++;
+      }
       return send(res, 202, { accepted }, extra);
     }
     return send(res, 404, { error: 'not found' }, extra);

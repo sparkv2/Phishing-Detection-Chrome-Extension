@@ -123,14 +123,17 @@ function getIndex() {
   return indexPromise;
 }
 
+// Brands, free mail, trackers and shared platforms are never flagged as a whole, whatever a downloaded list says.
+// The lists are filtered when they are built, but checking again here means a bad list can't mark gmail.com as a scam.
+const NEVER_FLAG = new Set([...D.BRANDS.flatMap((b) => b.domains), ...D.FREE_MAIL, ...D.TRACKING_DOMAINS]);
+
 async function lookup(hosts, urls) {
   const [{ idx, descs }, community] = await Promise.all([getIndex(), getCommunity()]);
   const hits = {};
   for (const host of (hosts || []).slice(0, 2000)) {
-    for (const h of I.hostAndParents(host)) {
-      const d = I.lookupCompact(idx, h);
-      if (d >= 0) { hits[host] = Object.assign({ matched: h }, descs[d]); break; }
-    }
+    if (!I.hostIsFlaggable(host, NEVER_FLAG)) continue;
+    const m = I.lookupHost(idx, host, NEVER_FLAG);
+    if (m) hits[host] = Object.assign({ matched: m.matched }, descs[m.desc]);
     if (!hits[host] && community && community.hashes.size) {
       const reg = A.registrableDomain(host);
       if (community.hashes.has(await fingerprint(reg))) {
@@ -145,19 +148,26 @@ async function lookup(hosts, urls) {
   return hits;
 }
 
-// Download the threat list from the Tripwire server (one ~1.5 MB file). Returns true on success.
+// Download the threat list from the Tripwire server (one ~1.5 MB file). It is only used if it carries a valid
+// signature from the project's signing key (see src/intel.js): the server can't forge one. Returns true on success.
 async function updateFromServer(c) {
   const opts = { cache: 'no-store', credentials: 'omit', referrerPolicy: 'no-referrer' };
   try {
-    const [m, b] = await Promise.all([fetch(SERVER + '/v1/intel/threat-intel.meta.json', opts), fetch(SERVER + '/v1/intel/threat-intel.bin', opts)]);
-    if (!m.ok || !b.ok) return false;
-    const meta = await m.json(), bin = await b.arrayBuffer();
-    if (I.parseCompact(bin).hi.length !== meta.total || meta.total < 1000) return false; // incomplete or damaged
+    const [m, s, b] = await Promise.all(['threat-intel.meta.json', 'threat-intel.meta.json.sig', 'threat-intel.bin']
+      .map((n) => fetch(SERVER + '/v1/intel/' + n, opts)));
+    if (!m.ok || !s.ok || !b.ok) return false;
+    const metaBytes = await m.arrayBuffer(), sig = await s.text(), bin = await b.arrayBuffer();
+    // The newest list date ever accepted is kept separately, so an attacker can't replay an older signed list,
+    // even after Tripwire has fallen back to the public feeds and dropped its server copy.
+    const { intelNewest } = await chrome.storage.local.get(['intelNewest']);
+    const meta = await I.verifyIntel(metaBytes, sig, bin, { notOlderThan: intelNewest || null }); // throws on any problem
+    if (meta.total < 1000) return false;
+    await chrome.storage.local.set({ intelNewest: meta.generated });
     await c.put('/server/meta', new Response(JSON.stringify(meta), { headers: { 'content-type': 'application/json' } }));
     await c.put('/server/bin', new Response(bin));
     for (const s of I.SOURCES) await c.delete('/live/' + s.id); // the server copy is newer than any per-feed copy
     return true;
-  } catch (e) { return false; }
+  } catch (e) { console.warn('[Tripwire] server list not used:', e.message); return false; }
 }
 async function updateCommunity(c) {
   const { communityEnabled } = await chrome.storage.local.get(['communityEnabled']);
