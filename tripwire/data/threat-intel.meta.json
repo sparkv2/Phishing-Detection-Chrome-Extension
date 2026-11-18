@@ -1,0 +1,165 @@
+{
+ "format": 1,
+ "generated": "2026-11-09T03:47:55Z",
+ "total": 192899,
+ "descs": [
+  {
+   "cat": "phishing",
+   "source": "OpenPhish",
+   "sourceId": "openphish",
+   "label": ""
+  },
+  {
+   "cat": "phishing",
+   "source": "Phishing Filter (PhishTank, OpenPhish, PhishStats)",
+   "sourceId": "phishing-filter",
+   "label": ""
+  },
+  {
+   "cat": "phishing",
+   "source": "CERT Polska warning list",
+   "sourceId": "cert-pl",
+   "label": ""
+  },
+  {
+   "cat": "malware",
+   "source": "URLhaus (abuse.ch) online malware sites",
+   "sourceId": "urlhaus",
+   "label": ""
+  },
+  {
+   "cat": "c2",
+   "source": "Feodo Tracker (abuse.ch) botnet C2 servers",
+   "sourceId": "feodo",
+   "label": ""
+  },
+  {
+   "cat": "c2",
+   "source": "Botnet Filter (abuse.ch based) malicious server IPs",
+   "sourceId": "botnet-filter",
+   "label": ""
+  },
+  {
+   "cat": "c2",
+   "source": "C2IntelFeeds (C2 server IPs, last 30 days)",
+   "sourceId": "c2intel-ip",
+   "label": "Possible Cobaltstrike C2 IP"
+  },
+  {
+   "cat": "c2",
+   "source": "C2IntelFeeds (C2 server domains, last 30 days)",
+   "sourceId": "c2intel-domain",
+   "label": "Possible Cobalt Strike C2 Domain"
+  },
+  {
+   "cat": "c2",
+   "source": "C2IntelFeeds (C2 server domains, last 30 days)",
+   "sourceId": "c2intel-domain",
+   "label": "Possible Cobalt Strike C2 Fronted Domain"
+  },
+  {
+   "cat": "c2",
+   "source": "C2IntelFeeds (C2 server domains, last 30 days)",
+   "sourceId": "c2intel-domain",
+   "label": "Possible Cobalt Strike C2 Fronting Domain"
+  }
+ ],
+ "sources": [
+  {
+   "id": "openphish",
+   "name": "OpenPhish",
+   "category": "phishing",
+   "license": "OpenPhish Community Feed (free)",
+   "homepage": "https://openphish.com/",
+   "fetchedFrom": "https://openphish.com/feed.txt",
+   "fetched": "2026-11-09T03:47:55Z",
+   "count": 540,
+   "skipped": 1,
+   "sample": "www.r.oblox.com.et"
+  },
+  {
+   "id": "phishing-filter",
+   "name": "Phishing Filter (PhishTank, OpenPhish, PhishStats)",
+   "category": "phishing",
+   "license": "CC0 / source terms",
+   "homepage": "https://gitlab.com/malware-filter/phishing-filter",
+   "fetchedFrom": "https://malware-filter.gitlab.io/phishing-filter/phishing-filter-domains.txt",
+   "fetched": "2026-11-09T03:47:55Z",
+   "count": 20342,
+   "skipped": 242,
+   "sample": "0-1-x.16215785.xyz"
+  },
+  {
+   "id": "cert-pl",
+   "name": "CERT Polska warning list",
+   "category": "phishing",
+   "license": "CERT Polska open data",
+   "homepage": "https://cert.pl/en/warning-list/",
+   "fetchedFrom": "https://hole.cert.pl/domains/v2/domains.txt",
+   "fetched": "2026-11-09T03:47:55Z",
+   "count": 124074,
+   "skipped": 471,
+   "sample": "0-ilxrc-w285.p9bckp.sbs"
+  },
+  {
+   "id": "urlhaus",
+   "name": "URLhaus (abuse.ch) online malware sites",
+   "category": "malware",
+   "license": "CC0",
+   "homepage": "https://urlhaus.abuse.ch/",
+   "fetchedFrom": "https://malware-filter.gitlab.io/urlhaus-filter/urlhaus-filter-domains-online.txt",
+   "fetched": "2026-11-09T03:47:55Z",
+   "count": 1825,
+   "skipped": 1,
+   "sample": "1.70.76.132"
+  },
+  {
+   "id": "feodo",
+   "name": "Feodo Tracker (abuse.ch) botnet C2 servers",
+   "category": "c2",
+   "license": "CC0",
+   "homepage": "https://feodotracker.abuse.ch/",
+   "fetchedFrom": "https://feodotracker.abuse.ch/downloads/ipblocklist.txt",
+   "fetched": "2026-11-09T03:47:55Z",
+   "count": 5,
+   "skipped": 0,
+   "sample": "162.243.103.246"
+  },
+  {
+   "id": "botnet-filter",
+   "name": "Botnet Filter (abuse.ch based) malicious server IPs",
+   "category": "c2",
+   "license": "CC0",
+   "homepage": "https://gitlab.com/malware-filter/botnet-filter",
+   "fetchedFrom": "https://malware-filter.gitlab.io/botnet-filter/botnet-filter-dnscrypt-blocked-ips.txt",
+   "fetched": "2026-11-09T03:47:55Z",
+   "count": 47272,
+   "skipped": 0,
+   "sample": "1.12.239.227"
+  },
+  {
+   "id": "c2intel-ip",
+   "name": "C2IntelFeeds (C2 server IPs, last 30 days)",
+   "category": "c2",
+   "license": "C2IntelFeeds (GitHub, drb-ra)",
+   "homepage": "https://github.com/drb-ra/C2IntelFeeds",
+   "fetchedFrom": "https://raw.githubusercontent.com/drb-ra/C2IntelFeeds/master/feeds/IPC2s-30day.csv",
+   "fetched": "2026-11-09T03:47:55Z",
+   "count": 228,
+   "skipped": 0,
+   "sample": "1.117.74.144"
+  },
+  {
+   "id": "c2intel-domain",
+   "name": "C2IntelFeeds (C2 server domains, last 30 days)",
+   "category": "c2",
+   "license": "C2IntelFeeds (GitHub, drb-ra)",
+   "homepage": "https://github.com/drb-ra/C2IntelFeeds",
+   "fetchedFrom": "https://raw.githubusercontent.com/drb-ra/C2IntelFeeds/master/feeds/domainC2s-30day-filter-abused.csv",
+   "fetched": "2026-11-09T03:47:55Z",
+   "count": 86,
+   "skipped": 2,
+   "sample": "1.win-faw.win"
+  }
+ ]
+}

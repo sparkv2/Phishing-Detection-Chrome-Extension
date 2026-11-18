@@ -1,0 +1,39 @@
+﻿# Rebuilds the bundled threat list from the public feeds every week and opens a pull request with the result.
+# The extension also refreshes the lists itself every 12 hours; this keeps the offline copy recent.
+name: Refresh threat list
+on:
+  schedule:
+    - cron: '17 4 * * 1'   # Mondays 04:17 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: tripwire
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm run build:intel
+      - run: npm test
+      - name: Open a pull request if the list changed
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if git diff --quiet -- data/; then echo "No changes."; exit 0; fi
+          branch="intel/$(date -u +%Y-%m-%d)"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$branch"
+          git add data/threat-intel.bin data/threat-intel.meta.json
+          git commit -m "Refresh bundled threat list ($(date -u +%Y-%m-%d))"
+          git push origin "$branch"
+          gh pr create --title "Refresh bundled threat list ($(date -u +%Y-%m-%d))" \
+            --body "Automated weekly rebuild from the public feeds (tools/build-threat-intel.mjs). Tests passed."

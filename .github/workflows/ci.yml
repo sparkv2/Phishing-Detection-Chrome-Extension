@@ -1,0 +1,26 @@
+﻿name: CI
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: tripwire
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Syntax-check every script
+        run: for f in background.js src/*.js popup/*.js offscreen/*.js practice/*.js tools/*.mjs; do node --check "$f"; done
+      - name: Tests (analyzer, threat index, lessons, manifest)
+        run: npm test
+      - name: Build store packages
+        run: npm run package
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tripwire-packages
+          path: tripwire/dist/*.zip

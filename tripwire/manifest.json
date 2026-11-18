@@ -2,8 +2,8 @@
   "manifest_version": 3,
   "name": "Tripwire — Phishing Email Checker",
   "short_name": "Tripwire",
-  "version": "1.1.0",
-  "description": "Spots phishing emails in any webmail, highlights risky messages, explains why, and warns you before you click. Checks run privately on your device.",
+  "version": "1.2.0",
+  "description": "Spots phishing emails in webmail, highlights risky messages, explains why, and warns you before you click. Checks run privately on your device.",
   "icons": { "16": "icons/icon16.png", "32": "icons/icon32.png", "48": "icons/icon48.png", "128": "icons/icon128.png" },
   "action": {
     "default_title": "Tripwire",
@@ -11,18 +11,38 @@
     "default_icon": { "16": "icons/icon16.png", "32": "icons/icon32.png" }
   },
   "background": { "service_worker": "background.js" },
-  "permissions": ["storage", "alarms", "activeTab"],
+  "permissions": ["storage", "alarms", "activeTab", "scripting", "webRequest", "offscreen"],
   "host_permissions": [
     "https://openphish.com/*",
     "https://raw.githubusercontent.com/*",
     "https://malware-filter.gitlab.io/*",
     "https://curbengh.github.io/*",
     "https://hole.cert.pl/*",
-    "https://feodotracker.abuse.ch/*"
+    "https://feodotracker.abuse.ch/*",
+    "https://*.googleusercontent.com/*",
+    "https://mail.google.com/*",
+    "*://bit.ly/*", "*://tinyurl.com/*", "*://t.co/*", "*://goo.gl/*", "*://ow.ly/*", "*://is.gd/*", "*://buff.ly/*",
+    "*://rebrand.ly/*", "*://cutt.ly/*", "*://shorturl.at/*", "*://rb.gy/*", "*://tiny.cc/*", "*://s.id/*", "*://v.gd/*",
+    "*://bl.ink/*", "*://short.io/*", "*://tr.im/*", "*://qr.co/*", "*://lnkd.in/*", "*://shorte.st/*"
   ],
+  "optional_host_permissions": ["https://*/*", "http://*/*"],
   "content_scripts": [
     {
-      "matches": ["<all_urls>"],
+      "matches": [
+        "https://mail.google.com/*",
+        "https://outlook.live.com/*",
+        "https://outlook.office.com/*",
+        "https://outlook.office365.com/*",
+        "https://outlook.cloud.microsoft/*",
+        "https://mail.yahoo.com/*",
+        "https://*.mail.yahoo.com/*",
+        "https://mail.aol.com/*",
+        "https://mail.proton.me/*",
+        "https://mail.zoho.com/*",
+        "https://app.fastmail.com/*",
+        "https://www.icloud.com/*",
+        "file:///*demo-inbox.html"
+      ],
       "js": ["src/data.js", "src/analyzer.js", "src/intel.js", "src/providers.js", "src/ui.js", "src/content.js"],
       "css": ["src/content.css"],
       "run_at": "document_idle"

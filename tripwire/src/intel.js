@@ -139,5 +139,101 @@
     c2: 'command-and-control (servers criminals use to control hacked computers)',
   };
 
-  root.PG_Intel = { SOURCES, SUBDOMAIN_PLATFORMS, PROTECTED, parseFeed, urlKeys, hostIsFlaggable, hostAndParents, hostFromLine, CATEGORY_TEXT };
+  // ---------- compact index ----------
+  // The threat list is stored as a sorted array of 53-bit hashes instead of ~193k strings.
+  // Each record is two Uint32 values: hi = 32 hash bits, lo = 21 more hash bits << 8 | description index.
+  // With 53 bits, the chance that a clean host collides with a listed one is about 1 in 40 billion per lookup.
+  // File layout (little-endian): "TWI1" magic, Uint32 count, then `count` hi values, then `count` lo values.
+  const MAGIC = 0x31495754; // "TWI1"
+
+  function hash53(str) { // cyrb53 (public domain): fast, well-distributed, identical in browsers and Node
+    let h1 = 0xdeadbeef, h2 = 0x41c6ce57;
+    for (let i = 0; i < str.length; i++) {
+      const ch = str.charCodeAt(i);
+      h1 = Math.imul(h1 ^ ch, 2654435761);
+      h2 = Math.imul(h2 ^ ch, 1597334677);
+    }
+    h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507); h1 ^= Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+    h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507); h2 ^= Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+    return [h1 >>> 0, h2 & 0x1fffff];
+  }
+
+  // entries: iterable of [key, descIndex]. Keys are hosts, or 'url:' + urlKey. Lower descIndex wins on duplicates.
+  function buildCompact(entries) { return mergeCompact([], entries); }
+
+  function serializeCompact(idx) {
+    const n = idx.hi.length;
+    const buf = new ArrayBuffer(8 + n * 8);
+    const head = new DataView(buf);
+    head.setUint32(0, MAGIC, true); head.setUint32(4, n, true);
+    new Uint32Array(buf, 8, n).set(idx.hi);
+    new Uint32Array(buf, 8 + n * 4, n).set(idx.lo);
+    return new Uint8Array(buf);
+  }
+
+  function parseCompact(arrayBuffer) {
+    const head = new DataView(arrayBuffer);
+    if (head.byteLength < 8 || head.getUint32(0, true) !== MAGIC) throw new Error('not a Tripwire threat index');
+    const n = head.getUint32(4, true);
+    // Copy into fresh arrays so the views are aligned regardless of the source buffer's offset.
+    return { hi: new Uint32Array(arrayBuffer.slice(8, 8 + n * 4)), lo: new Uint32Array(arrayBuffer.slice(8 + n * 4, 8 + n * 8)) };
+  }
+
+  // Returns the description index for `key`, or -1.
+  function lookupCompact(idx, key) {
+    const [hi, lo] = hash53(key);
+    let a = 0, b = idx.hi.length - 1;
+    while (a <= b) {
+      const m = (a + b) >>> 1;
+      const mh = idx.hi[m];
+      if (mh < hi) a = m + 1;
+      else if (mh > hi) b = m - 1;
+      else {
+        const ml = idx.lo[m] >>> 8;
+        if (ml < lo) a = m + 1;
+        else if (ml > lo) b = m - 1;
+        else return idx.lo[m] & 0xff;
+      }
+    }
+    return -1;
+  }
+
+  // All records as [hi, lo] pairs whose description index passes `keep` (used to merge bundled + live lists).
+  function* compactRecords(idx, keep) {
+    for (let i = 0; i < idx.hi.length; i++) if (!keep || keep(idx.lo[i] & 0xff)) yield [idx.hi[i], idx.lo[i]];
+  }
+  function mergeCompact(recordIters, freshEntries) {
+    const packed = [];
+    for (const it of recordIters) for (const [hi, lo] of it) packed.push((BigInt(hi) << 32n) | BigInt(lo >>> 0));
+    for (const [key, d] of freshEntries) {
+      const [hi, lo] = hash53(key);
+      packed.push((BigInt(hi) << 32n) | BigInt(((lo << 8) | d) >>> 0));
+    }
+    const all = BigUint64Array.from(packed).sort();
+    const his = [], los = [];
+    let prev = -1n;
+    for (const v of all) {
+      const k = v >> 8n; // hash without the description byte
+      if (k === prev) continue; // same key listed twice: keep the first (lowest description index)
+      prev = k;
+      his.push(Number(v >> 32n)); los.push(Number(v & 0xffffffffn));
+    }
+    return { hi: Uint32Array.from(his), lo: Uint32Array.from(los) };
+  }
+
+  // Entries for one parsed source, already filtered so shared platforms are never flagged as a whole.
+  // Returns { entries: [[key, descIndex]], count, skipped }. `descFor(label)` maps a label to a description index.
+  function sourceEntries(data, descFor, extraProtected) {
+    const entries = [];
+    let skipped = 0;
+    for (const h of data.hosts || []) {
+      if (!hostIsFlaggable(h, extraProtected)) { skipped++; continue; }
+      entries.push([h, descFor(data.labels && data.labels[h])]);
+    }
+    for (const u of data.urls || []) entries.push(['url:' + u, descFor('')]);
+    return { entries, count: entries.length, skipped };
+  }
+
+  root.PG_Intel = { SOURCES, SUBDOMAIN_PLATFORMS, PROTECTED, parseFeed, urlKeys, hostIsFlaggable, hostAndParents, hostFromLine, CATEGORY_TEXT,
+    hash53, buildCompact, serializeCompact, parseCompact, lookupCompact, compactRecords, mergeCompact, sourceEntries };
 })(typeof globalThis !== 'undefined' ? globalThis : this);

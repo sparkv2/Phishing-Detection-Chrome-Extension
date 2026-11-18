@@ -45,6 +45,8 @@
   li { margin: 2px 0; }
   .from { font-size: 13px; color: #57606a; word-break: break-all; }
   .ok { color: #1a7f37; font-weight: 600; }
+  .bad { color: #c62828; font-weight: 700; }
+  .muted { color: #57606a; }
   .reason { padding: 8px 10px; margin: 6px 0; border-radius: 8px; background: #f6f8fa; border-left: 3px solid var(--c); }
   .reason b { display: block; }
   .ev { display: inline-block; margin-top: 4px; font: 12px/1.4 ui-monospace, Consolas, monospace; background: #fff;
@@ -149,11 +151,17 @@
 
     // Summary
     const s = result.sender;
+    const brandNote = result.verifiedBrand
+      ? (result.auth === 'pass' ? h('span', { class: 'ok' }, `  ✓ verified ${result.verifiedBrand} address`)
+        : h('span', { class: 'muted' }, `  · address matches ${result.verifiedBrand} (not verified)`))
+      : result.forgedBrand ? h('span', { class: 'bad' }, `  ✕ forged ${result.forgedBrand} address`) : null;
     const fromLine = h('p', { class: 'from' }, 'From: ', s.name ? s.name + ' ' : '', s.email ? `<${s.email}>` : '(address not shown)',
-      result.verifiedBrand ? h('span', { class: 'ok' }, `  ✓ real ${result.verifiedBrand} address`) : null,
-      result.trusted ? h('span', { class: 'ok' }, '  ✓ you marked this sender as trusted') : null);
-    const sum = h('section', {}, h('h4', {}, 'Summary'), fromLine, h('p', {}, result.summary));
+      brandNote, result.trusted ? h('span', { class: 'ok' }, '  ✓ you marked this sender as trusted') : null);
+    const sum = h('section', {}, h('h4', {}, result.aiSummary ? 'Summary (on-device AI)' : 'Summary'), fromLine, h('p', {}, result.summary));
     if (result.asks.length) sum.append(h('p', {}, 'This email is asking you to:'), h('ul', {}, result.asks.map((a) => h('li', {}, a))));
+    if (result.attachments && result.attachments.length) sum.append(h('p', { class: 'from' }, 'Attachments: ' + result.attachments.join(', ')));
+    const PENDING = { auth: 'sender authentication', attachments: 'attachments', qr: 'images for QR codes', ai: 'wording (on-device AI)' };
+    if (opts.pending && opts.pending.length) sum.append(h('p', { class: 'from' }, '⏳ Still checking: ' + opts.pending.map((p) => PENDING[p] || p).join(', ') + '…'));
     card.append(sum);
 
     // Why
@@ -168,7 +176,9 @@
       }
       card.append(why);
     } else {
-      const checked = [s.email ? 'the sender\'s address' : null, `${result.links.length} link(s)`, 'the wording for pressure tactics and requests for information'].filter(Boolean);
+      const checked = [s.email ? 'the sender\'s address' : null, result.auth !== 'unknown' ? 'its anti-forgery check (SPF/DKIM/DMARC)' : null,
+        `${result.links.length} link(s)`, result.attachments && result.attachments.length ? `${result.attachments.length} attachment(s)` : null,
+        'the wording for pressure tactics and requests for information'].filter(Boolean);
       const minor = result.signals.filter((x) => x.weight > 0);
       const sec = h('section', {}, h('h4', {}, 'What we checked'), h('p', {}, 'We checked ' + checked.join(', ') + '.'));
       if (minor.length) sec.append(h('p', { class: 'from' }, 'Minor notes (not enough to be a concern): ' + minor.map((m) => m.title.toLowerCase()).join('; ') + '.'));
@@ -210,22 +220,40 @@
   }
 
   // Click warning. Resolves true if the user insists on opening the link.
-  function confirmLink(info) {
+  // opts.expand: optional promise for a shortened link, resolving to the judged final destination (or null).
+  function confirmLink(info, opts) {
+    opts = opts || {};
     return new Promise((resolve) => {
       const { host, sr } = shadowHost('div');
       const level = info.known || info.emailLevel === 'phishing' ? 'phishing' : 'suspicious';
       const close = (v) => { host.remove(); document.removeEventListener('keydown', onKey, true); resolve(v); };
       const onKey = (e) => { if (e.key === 'Escape') { e.stopPropagation(); close(false); } };
       document.addEventListener('keydown', onKey, true);
-      const reasons = info.signals.slice(0, 3);
+      const reasonList = (x) => {
+        const reasons = x.signals.slice(0, 3);
+        return reasons.length ? h('ul', {}, reasons.map((r) => h('li', {}, h('b', {}, r.title + ': '), r.explain))) :
+          h('p', {}, x.emailLevel === 'phishing' ? 'This link is inside an email that looks like a phishing scam.' : 'This link is inside an email with warning signs.');
+      };
+      const destVal = h('div', { class: 'val' }, info.host || info.href.slice(0, 120));
+      const destNote = h('div', { class: 'lbl' });
+      let reasonsEl = reasonList(info);
+      if (opts.expand) {
+        destNote.textContent = '⏳ This is a shortened link. Asking the shortener where it leads (the destination is not opened)…';
+        opts.expand.then((j) => {
+          if (!host.isConnected) return;
+          if (!j) { destNote.textContent = 'Couldn\'t find out where this shortened link leads. Treat it with care.'; return; }
+          destVal.textContent = j.host || j.finalHref;
+          destNote.textContent = `Followed ${j.hops ? j.hops.length : 1} redirect(s) for you without opening the page.`;
+          const next = reasonList(j); reasonsEl.replaceWith(next); reasonsEl = next;
+        });
+      }
       const back = h('button', { class: 'btn primary', onclick: () => close(false) }, 'Go back to safety');
       const dlg = h('div', { class: 'dialog ' + level, role: 'alertdialog', 'aria-modal': 'true', 'aria-label': 'Link warning' },
         h('div', { class: 'dh' }, level === 'phishing' ? '⚠ Stop — this link looks dangerous' : '⚠ Wait — check this link first'),
         h('div', { class: 'db' },
           info.text ? h('div', { class: 'dest' }, h('div', { class: 'lbl' }, 'The link says'), h('div', { class: 'val' }, info.text.slice(0, 120))) : null,
-          h('div', { class: 'dest' }, h('div', { class: 'lbl' }, 'It really goes to'), h('div', { class: 'val' }, info.host || info.href.slice(0, 120))),
-          reasons.length ? h('ul', {}, reasons.map((r) => h('li', {}, h('b', {}, r.title + ': '), r.explain))) :
-            h('p', {}, info.emailLevel === 'phishing' ? 'This link is inside an email that looks like a phishing scam.' : 'This link is inside an email with warning signs.'),
+          h('div', { class: 'dest' }, h('div', { class: 'lbl' }, 'It really goes to'), destVal, destNote),
+          reasonsEl,
           h('p', {}, 'If you need to visit this company, open their official app or type their address into your browser yourself.')),
         h('div', { class: 'actions' },
           h('button', { class: 'link-anyway', onclick: () => close(true) }, 'I understand the risk, open anyway'), back));

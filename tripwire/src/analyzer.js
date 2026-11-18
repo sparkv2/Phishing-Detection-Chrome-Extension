@@ -223,7 +223,16 @@
 
   // ---------- link-text mismatch ----------
   function analyzeLink(link, lists, ctx) {
-    const res = analyzeUrl(link.href, lists);
+    // A shortened link the background worker already followed is judged by where it really ends up.
+    const expandedTo = lists && lists.expanded && lists.expanded.get((link.href || '').trim());
+    const res = analyzeUrl(expandedTo || link.href, lists);
+    if (expandedTo) {
+      res.href = (link.href || '').trim();
+      res.expandedFrom = res.href;
+      res.signals.push(sig('short-link-expanded', 'link', 5, 'Shortened link (checked)',
+        `This shortened link was followed for you: it really goes to "${res.host || expandedTo}".`, res.host || expandedTo));
+      res.weight += 5;
+    }
     const text = (link.text || '').trim();
     if (!res.host) return res;
     const shown = domainInText(text);
@@ -252,6 +261,38 @@
     return res;
   }
 
+  // ---------- email authentication (SPF / DKIM / DMARC) ----------
+  // Parses raw message headers (or just Authentication-Results lines) into { spf, dkim, dmarc, dkimDomains, fromDomain }.
+  // Only the first (top-most) Authentication-Results header counts: it was added by the user's own mail provider.
+  // Lower headers could have been written by the sender and are ignored.
+  function parseAuthResults(headers) {
+    const text = (headers || '').toString();
+    const head = text.split(/\r?\n\r?\n/)[0].replace(/\r?\n[ \t]+/g, ' '); // header block only, unfolded
+    const line = head.split(/\r?\n/).find((l) => /^authentication-results:/i.test(l));
+    if (!line) return null;
+    const v = line.replace(/^authentication-results:\s*/i, '');
+    const res = (method) => { const m = v.match(new RegExp('\\b' + method + '\\s*=\\s*([a-z]+)', 'i')); return m ? lc(m[1]) : ''; };
+    const dkimDomains = [];
+    for (const m of v.matchAll(/\bdkim\s*=\s*pass\b[^;]*?header\.(?:i|d)\s*=\s*@?([a-z0-9.\-]+)/gi)) dkimDomains.push(lc(m[1]));
+    const from = v.match(/header\.from\s*=\s*([a-z0-9.\-]+)/i);
+    const spfFrom = v.match(/smtp\.mailfrom\s*=\s*(?:[^@;\s]*@)?([a-z0-9.\-]+)/i);
+    return { spf: res('spf'), dkim: res('dkim'), dmarc: res('dmarc'), dkimDomains: uniq(dkimDomains),
+      fromDomain: from ? lc(from[1]) : '', spfDomain: spfFrom ? lc(spfFrom[1]) : '', source: 'headers' };
+  }
+
+  // 'pass' (the From address is proven), 'fail' (it is probably forged) or 'unknown'.
+  function authVerdict(auth, senderDomain) {
+    if (!auth) return 'unknown';
+    const reg = registrableDomain(senderDomain || '');
+    if (auth.dmarc === 'pass') return 'pass';
+    if (auth.dmarc === 'fail') return 'fail';
+    const aligned = (auth.dkimDomains || []).some((d) => registrableDomain(d) === reg);
+    if (auth.dkim === 'pass' && aligned) return 'pass';
+    if (['fail', 'softfail'].includes(auth.spf) && auth.dkim !== 'pass') return 'fail';
+    if (auth.dkim === 'fail' && auth.spf !== 'pass') return 'fail';
+    return 'unknown';
+  }
+
   // ---------- sender analysis ----------
   function parseSender(name, email) {
     name = (name || '').trim();
@@ -276,10 +317,10 @@
     return null;
   }
 
-  function analyzeSender(sender, lists) {
+  function analyzeSender(sender, lists, auth) {
     const signals = [];
     const { name, email, domain } = sender;
-    const ctx = { senderBrand: null, verifiedBrand: false, free: false };
+    const ctx = { senderBrand: null, verifiedBrand: false, free: false, auth: 'unknown' };
     if (!domain) {
       const b = claimedBrand(name);
       ctx.claimed = b;
@@ -309,6 +350,21 @@
       const own = brandOfDomain(domain);
       if (own && !ctx.free) { ctx.senderBrand = own; ctx.verifiedBrand = true; }
     }
+    // A From address is easy to fake. Brand trust only stands if the provider's authentication check agrees.
+    ctx.auth = authVerdict(auth, domain);
+    if (ctx.auth === 'fail') {
+      const what = auth.dmarc === 'fail' ? 'DMARC' : auth.dkim === 'fail' ? 'DKIM' : 'SPF';
+      if (ctx.verifiedBrand) {
+        signals.push(sig('auth-fail-brand', 'sender', 50, `Forged ${ctx.senderBrand.name} address`,
+          `The email claims to come from ${email}, a real ${ctx.senderBrand.name} address, but it failed the anti-forgery check (${what}) that real ${ctx.senderBrand.name} mail passes. Someone else sent it and faked the From address.`,
+          `${what}=fail for ${domain}`));
+        ctx.verifiedBrand = false; ctx.forgedBrand = ctx.senderBrand.name;
+      } else {
+        signals.push(sig('auth-fail', 'sender', 25, 'Sender address may be forged',
+          `This email failed the anti-forgery check (${what}) for ${domain}, so it may not really come from ${email}.`, `${what}=fail for ${domain}`));
+      }
+    }
+    ctx.authVerified = ctx.verifiedBrand && ctx.auth === 'pass';
     const nameEmail = name.match(EMAIL_RE);
     if (nameEmail && lc(nameEmail[0]) !== email) {
       signals.push(sig('name-email-mismatch', 'sender', 35, 'Sender name shows a different address',
@@ -363,12 +419,96 @@
       const weight = Math.min(info.cap, info.w + info.step * (n - 1));
       signals.push(sig('content-' + cat, cat, weight, info.title, info.explain, found[cat].slice(0, 4).map((x) => `"${x}"`).join(', ')));
     }
+    return { signals, found };
+  }
+
+  // ---------- attachments ----------
+  // attachments: [{ name, mime, html: { password, form, redirect, obfuscated } }] read from the webmail page.
+  const EXEC_EXT = /\.(exe|scr|js|jse|vbs|vbe|bat|cmd|com|pif|msi|msix|appx|hta|wsf|wsh|lnk|jar|ps1|psm1|cpl|reg|dll|chm|application|url)$/i;
+  const HTML_EXT = /\.(html?|shtml|xhtml|svg|mht|mhtml)$/i;
+  const DISK_EXT = /\.(iso|img|vhdx?)$/i;
+  const MACRO_EXT = /\.(docm|dotm|xlsm|xltm|xlam|pptm|potm|ppam|sldm)$/i;
+  const ARCHIVE_EXT = /\.(zip|rar|7z|gz|tgz|cab|ace|arj)$/i;
+  const DOC_EXT = /\.(pdf|docx?|xlsx?|pptx?|txt|rtf|csv|odt|jpe?g|png|gif|mp3|mp4|wav)$/i;
+
+  function analyzeAttachments(attachments, body) {
+    const signals = [];
+    const seen = new Set();
+    for (const a of attachments || []) {
+      const name = (a.name || '').trim().replace(/[‎‏‪-‮⁦-⁩]/g, (c) => (c === '‮' ? '«RTL»' : ''));
+      if (!name || seen.has(lc(name))) continue;
+      seen.add(lc(name));
+      const add = (id, weight, title, explain) => signals.push(sig(id, 'attachment', weight, title, explain, name));
+      const base = name.replace(/\.[a-z0-9]{1,5}$/i, '');
+      if (name.includes('«RTL»')) add('attachment-rtlo', 45, 'Attachment name is reversed to hide its type',
+        'The file name contains a hidden character that flips the text, so a program can pretend to be a document.');
+      if ((EXEC_EXT.test(name) || HTML_EXT.test(name) || DISK_EXT.test(name)) && (DOC_EXT.test(base) || /\.(pdf|docx?|xlsx?)\s+$/i.test(base))) {
+        add('attachment-double-ext', 40, 'Attachment pretends to be a document',
+          `"${name}" looks like a ${base.split('.').pop().toUpperCase()} file, but the real type is the last part (.${name.split('.').pop()}). This trick is used to sneak in fake login pages and harmful programs.`);
+      } else if (EXEC_EXT.test(name)) {
+        add('attachment-executable', 35, 'Attachment is a program', `"${name}" is a program or script. Opening it could install harmful software. Real invoices and documents are never programs.`);
+      } else if (DISK_EXT.test(name)) {
+        add('attachment-disk-image', 30, 'Attachment is a disk image', `"${name}" is a disk image. These are used to slip harmful programs past security checks.`);
+      } else if (HTML_EXT.test(name)) {
+        add('attachment-html', 25, 'Attachment is a web page', `"${name}" opens in your browser like a website. Scammers send these to show a fake login page that isn't on any blocklist.`);
+      } else if (MACRO_EXT.test(name)) {
+        add('attachment-macro', 20, 'Attachment can run macros', `"${name}" is an Office file that can run built-in programs (macros). Don't click "Enable content".`);
+      } else if (ARCHIVE_EXT.test(name) && /pass(word|code)|\bpwd\b|kennwort|contraseña|mot de passe/i.test(body || '')) {
+        add('attachment-locked-archive', 15, 'Password-protected archive', `"${name}" is a compressed file and the email gives you a password for it. Locking a file this way stops security scanners from looking inside.`);
+      }
+      const h = a.html;
+      if (h && (h.password || h.form)) {
+        add('attachment-login-form', 45, 'Attachment contains a login form', `"${name}" has boxes for a password or other details. Typing into a file you got by email sends your details to whoever made it.`);
+      } else if (h && (h.redirect || h.obfuscated)) {
+        add('attachment-redirect', 30, 'Attachment secretly opens a website', `"${name}" contains hidden code that sends you to another website as soon as it opens.`);
+      }
+    }
+    return signals;
+  }
+
+  // Text-only fallback when the page doesn't show an attachment list.
+  function mentionedAttachment(body) {
     const att = (body || '').match(D.RISKY_ATTACHMENT);
     if (att && /(attach|download|open|file|document|invoice)/i.test(body)) {
-      signals.push(sig('risky-attachment', 'attachment', 15, 'Mentions a risky file type',
-        `The email refers to "${att[0].trim()}". Files like this can install harmful software when opened.`, att[0].trim()));
+      return sig('risky-attachment', 'attachment', 15, 'Mentions a risky file type',
+        `The email refers to "${att[0].trim()}". Files like this can install harmful software when opened.`, att[0].trim());
     }
-    return { signals, found };
+    return null;
+  }
+
+  // ---------- sender history ----------
+  // history: { seenBefore, mature, nameKnownElsewhere } computed on the device from hashed past senders.
+  function historySignals(history, sender, found, trusted) {
+    const out = [];
+    if (!history || trusted || !sender.email) return out;
+    if (history.nameKnownElsewhere) {
+      out.push(sig('new-address-for-name', 'sender', 30, 'Familiar name, new address',
+        `You've had emails from "${sender.name}" before, but always from a different address. This one comes from ${sender.email}. Scammers copy the names of bosses, colleagues and suppliers to ask for money or details.`,
+        `${sender.name} <${sender.email}>`));
+    }
+    if (history.mature && !history.seenBefore) {
+      const sensitive = !!(found.credentials || found.financial || found.secrecy);
+      out.push(sig('first-time-sender', 'sender', sensitive ? 15 : 4, 'First email from this sender',
+        sensitive ? `This is the first email you've had from ${sender.email}, and it already asks for money, details or secrecy. Check who they are another way before replying.`
+          : `This is the first email you've had from ${sender.email}.`, sender.email));
+    }
+    return out;
+  }
+
+  // ---------- on-device AI hints ----------
+  // ai: { risk: 'low'|'medium'|'high', asks: [...], reasons: [...], summary } from Chrome's built-in model (optional).
+  const AI_ASK_TEXT = { credentials: 'Give personal information, a password or a code', payment: 'Make a payment or share payment details',
+    gift_cards: 'Buy gift cards', click_link: 'Click a link or button', open_attachment: 'Open an attachment', call_phone: 'Call a phone number',
+    reply: 'Reply to the email', personal_info: 'Give personal information, a password or a code' };
+  function aiSignals(ai, found) {
+    if (!ai || !ai.risk || ai.risk === 'low') return [];
+    const keywordsMissed = !(found.credentials || found.financial || found.secrecy || found.prize);
+    // Alone, a "high" verdict is just enough for yellow (score 68), never for red or "very suspicious".
+    const weight = ai.risk === 'high' ? (keywordsMissed ? 32 : 15) : (keywordsMissed ? 12 : 6);
+    const why = (ai.reasons || []).filter(Boolean).slice(0, 2).join(' ');
+    return [sig('ai-intent', 'ai', weight, ai.risk === 'high' ? 'Reads like a scam (on-device AI)' : 'Wording looks manipulative (on-device AI)',
+      (why ? why + ' ' : '') + 'This judgement comes from Chrome\'s built-in AI model, running on your computer. It can be wrong, so it only nudges the score.',
+      (ai.asks || []).filter((a) => a !== 'none').join(', '))];
   }
 
   // What does the email want the reader to do? Plain-language list for the summary.
@@ -404,22 +544,46 @@
   }
 
   // ---------- main ----------
-  // input: { senderName, senderEmail, subject, body, links: [{href,text}], hasForm, context: 'list'|'open' }
-  // lists: { feed:Set, blocked:Set, trusted:Set }
+  // input: { senderName, senderEmail, subject, body, links: [{href,text}], hasForm, context: 'list'|'open',
+  //          auth: parsed Authentication-Results, attachments: [{name, html}], qrCodes: [{data}], history: {...}, ai: {...} }
+  // lists: { blocked:Set, trusted:Set, threats:Map, expanded:Map(shortHref -> finalHref), feed:Set }
   function analyzeEmail(input, lists) {
     lists = lists || {};
     const sender = parseSender(input.senderName, input.senderEmail);
     const trusted = !!(lists.trusted && sender.email && (lists.trusted.has(sender.email) || lists.trusted.has(sender.domain)));
 
-    const s = analyzeSender(sender, lists);
-    let senderSignals = trusted ? s.signals.filter((x) => x.category === 'known') : s.signals;
+    const s = analyzeSender(sender, lists, input.auth);
+    // Trusting a sender silences warnings about them, except known threats and failed anti-forgery checks:
+    // a forged From address can copy anyone, including people you trust.
+    let senderSignals = trusted ? s.signals.filter((x) => x.category === 'known' || x.id.startsWith('auth-fail')) : s.signals;
 
     const content = analyzeContent(input.subject, input.body);
     let contentSignals = content.signals;
+    senderSignals.push(...historySignals(input.history, sender, content.found, trusted));
+    const attachmentSignals = input.attachments && input.attachments.length ? analyzeAttachments(input.attachments, input.body)
+      : [mentionedAttachment(input.body)].filter(Boolean);
+    const aiSigs = trusted ? [] : aiSignals(input.ai, content.found);
+
+    // QR codes found in images are treated like links: scammers use them to get past link scanners.
+    const qrLinks = [];
+    for (const q of (input.qrCodes || [])) {
+      const data = (q.data || '').trim();
+      if (!/^https?:\/\//i.test(data) && !/^[a-z0-9.\-]+\.[a-z]{2,}\//i.test(data)) continue;
+      qrLinks.push({ href: /^https?:/i.test(data) ? data : 'https://' + data, text: '', qr: true });
+    }
 
     // Links: judge each unique destination, keep the most serious ones.
     const linkResults = [];
     const seen = new Set();
+    for (const r of qrLinks) {
+      const res = analyzeLink(r, lists, s.ctx);
+      if (!res.host) continue;
+      res.qr = true;
+      res.signals.unshift(sig('qr-code', 'link', 15, 'QR code hides a link',
+        `An image in this email is a QR code that opens "${res.host}". Scanning it with your phone skips the link checks your computer does, which is why scammers use them.`, res.host));
+      res.weight += 15;
+      linkResults.push(Object.assign(res, { text: 'QR code' }));
+    }
     for (const l of (input.links || [])) {
       const key = (l.href || '') + '|' + (l.text || '').trim().slice(0, 60);
       if (seen.has(key)) continue; seen.add(key);
@@ -461,8 +625,10 @@
     // ----- scoring -----
     let contentPenalty = contentSignals.reduce((a, x) => a + x.weight, 0);
     contentPenalty = Math.min(contentPenalty, 45); // wording alone can never make an email "red"
+    const cleanLinks = !riskyLinks.some((r) => r.weight >= 20);
     if (trusted) contentPenalty *= 0.3;
-    else if (s.ctx.verifiedBrand && !riskyLinks.some((r) => r.weight >= 20)) contentPenalty *= 0.4; // real brand, clean links
+    else if (s.ctx.authVerified && cleanLinks) contentPenalty *= 0.4; // proven brand address, clean links
+    else if (s.ctx.verifiedBrand && cleanLinks) contentPenalty *= 0.6; // brand address, but authentication couldn't be checked
 
     const senderPenalty = senderSignals.filter((x) => x.category !== 'known').reduce((a, x) => a + x.weight, 0);
     const linkWeights = riskyLinks.filter((r) => !r.known).map((r) => r.weight);
@@ -470,13 +636,16 @@
     if (linkWeights.length) linkPenalty = linkWeights[0] + linkWeights.slice(1).reduce((a, w) => a + w * 0.25, 0);
     linkPenalty += linkSignals.filter((x) => x.id === 'form').reduce((a, x) => a + x.weight, 0);
     linkPenalty = Math.min(linkPenalty, 70);
+    const attWeights = attachmentSignals.map((x) => x.weight).sort((a, b) => b - a);
+    const attachmentPenalty = Math.min(60, (attWeights[0] || 0) + attWeights.slice(1).reduce((a, w) => a + w * 0.25, 0));
+    const aiPenalty = Math.min(32, aiSigs.reduce((a, x) => a + x.weight, 0));
 
     // Technical red flags combined with a coercive request strengthen each other.
     let comboTech = 0;
-    if ((senderPenalty >= 30 || linkPenalty >= 30) && (ask || coercion)) comboTech = 15;
+    if ((senderPenalty >= 30 || linkPenalty >= 30 || attachmentPenalty >= 30) && (ask || coercion)) comboTech = 15;
 
     const known = senderSignals.some((x) => x.category === 'known') || linkResults.some((r) => r.known);
-    let score = Math.round(100 - contentPenalty - senderPenalty - linkPenalty - comboTech);
+    let score = Math.round(100 - contentPenalty - senderPenalty - linkPenalty - attachmentPenalty - aiPenalty - comboTech);
     // 0 is reserved for confirmed phishing; unconfirmed emails bottom out at 10 however many warning signs they have.
     score = known ? 0 : Math.max(10, Math.min(100, score));
 
@@ -487,19 +656,26 @@
     else if (score < 70) level = 'suspicious';
     const high = !known && score < 35;
 
-    const signals = [...senderSignals, ...linkSignals, ...contentSignals].sort((a, b) => b.weight - a.weight);
+    const signals = [...senderSignals, ...linkSignals, ...attachmentSignals, ...contentSignals, ...aiSigs].sort((a, b) => b.weight - a.weight);
     const bodyText = input.body || '';
+    let asks = input.context === 'open' ? detectAsks(bodyText, input.links, content.found) : [];
+    if (input.ai && input.context === 'open') asks = uniq([...asks, ...(input.ai.asks || []).map((a) => AI_ASK_TEXT[a]).filter(Boolean)]);
     return {
       score, level, high, known, trusted, signals,
       threatCategory: known ? ((signals.find((x) => x.category === 'known') || {}).threatCategory || 'phishing') : null,
       sender,
       verifiedBrand: s.ctx.verifiedBrand ? s.ctx.senderBrand.name : null,
+      auth: s.ctx.auth, // 'pass' | 'fail' | 'unknown'
+      forgedBrand: s.ctx.forgedBrand || null,
       links: linkResults,
       riskyLinks,
-      asks: input.context === 'open' ? detectAsks(bodyText, input.links, content.found) : [],
-      summary: input.context === 'open' ? summarize(input.subject, bodyText) : '',
+      attachments: (input.attachments || []).map((a) => a.name),
+      asks,
+      summary: input.context === 'open' ? ((input.ai && input.ai.summary) || summarize(input.subject, bodyText)) : '',
+      aiSummary: !!(input.ai && input.ai.summary && input.context === 'open'),
     };
   }
 
-  root.PG_Analyzer = { analyzeEmail, analyzeUrl, analyzeLink, registrableDomain, lookalikeBrand, unwrapUrl, summarize, parseSender };
+  root.PG_Analyzer = { analyzeEmail, analyzeUrl, analyzeLink, analyzeAttachments, registrableDomain, lookalikeBrand, unwrapUrl, summarize,
+    parseSender, parseAuthResults, authVerdict, isIP, brandOfDomain };
 })(typeof globalThis !== 'undefined' ? globalThis : this);
