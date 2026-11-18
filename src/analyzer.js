@@ -146,7 +146,11 @@
     out.host = host; out.regDomain = reg; out.finalHref = u.href;
 
     const threat = knownThreat(host, lists, u);
-    if (threat) {
+    if (threat && threat.cat === 'community') {
+      // Reported by several Tripwire users, but not confirmed by a curated list: a strong warning, never "red".
+      out.signals.push(sig('community-link', 'link', 35, 'Link goes to a site other Tripwire users reported',
+        `"${host}" was reported as phishing by at least ${threat.threshold || 3} different Tripwire users. It isn't on a confirmed list yet, so treat it as dangerous but unconfirmed.`, host));
+    } else if (threat) {
       out.known = true;
       out.threat = threat;
       out.signals.push(threatSignal('known-bad-link', 'link', threat, threat.byUrl ? (threat.matched || host) : host));
@@ -330,7 +334,10 @@
     ctx.free = D.FREE_MAIL.includes(reg) || D.FREE_MAIL.includes(domain);
 
     const senderThreat = (lists.blocked && lists.blocked.has(email)) ? { cat: 'reported', source: 'your reports' } : knownThreat(domain, lists);
-    if (senderThreat) signals.push(threatSignal('known-bad-sender', 'sender', senderThreat, senderThreat.cat === 'reported' ? email : domain));
+    if (senderThreat && senderThreat.cat === 'community') {
+      signals.push(sig('community-sender', 'sender', 35, 'Other Tripwire users reported this sender\'s domain',
+        `${domain} was reported as phishing by at least ${senderThreat.threshold || 3} different Tripwire users. It isn't on a confirmed list yet.`, email));
+    } else if (senderThreat) signals.push(threatSignal('known-bad-sender', 'sender', senderThreat, senderThreat.cat === 'reported' ? email : domain));
     if (/[^\x00-\x7f]/.test(domain) || domain.includes('xn--')) {
       signals.push(sig('unicode-sender', 'sender', 30, 'Sender address uses disguised characters',
         'The sender\'s address contains foreign look-alike letters, a trick to impersonate a real company.', email));

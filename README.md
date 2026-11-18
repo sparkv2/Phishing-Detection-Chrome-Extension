@@ -101,5 +101,5 @@ npm run package       # dist/ folders and zips for chrome, edge, firefox
 ```
 The same analyzer cases also run in the browser: open `test/analyzer-tests.html`.
 
-## Not done yet
-- **Opt-in sharing of reported domains.** This needs a server to collect and publish the shared list. The plan is to send only salted hashes of domains the user reports, and only with explicit opt-in.
+## Tripwire server
+`server/` holds the small service at `tripwire.sparkv2.com`. It mirrors the threat list and collects opt-in community reports (SHA-256 fingerprints of domains only), published once 3 different networks report a domain. See [server/README.md](server/README.md) for the setup, the hardening and the Cloudflare Tunnel.

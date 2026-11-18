@@ -87,6 +87,13 @@
       ai: { risk: 'high', asks: ['credentials', 'click_link'], reasons: ['Threatens to block the account and asks for a password.'] } }, 'suspicious'],
   ];
 
+  // Community reports are yellow, never red.
+  EMAILS.push(['Link to a community-reported domain', { senderName: 'Shop', senderEmail: 'deals@shop.example', subject: 'Sale', body: 'Our autumn sale is on now.',
+    links: [{ href: 'https://reported-by-users.example/sale', text: 'Shop now' }] }, 'suspicious',
+    T([['reported-by-users.example', { cat: 'community', source: 'Tripwire community reports', threshold: 3, matched: 'reported-by-users.example' }]])]);
+  EMAILS.push(['Sender domain reported by the community', { senderName: 'Accounts', senderEmail: 'billing@reported-sender.example', subject: 'Invoice', body: 'Please see the invoice for this month.', links: [] },
+    'suspicious', T([['reported-sender.example', { cat: 'community', source: 'Tripwire community reports', threshold: 3, matched: 'reported-sender.example' }]])]);
+
   // [url, expected to have any warning]
   const URLS = [['https://paypal.com.secure-login.ru/x', true], ['https://www.paypal.com/signin', false], ['https://micros0ft.com', true],
     ['https://amazon-billing-update.com', true], ['https://goggle.com', true], ['https://linkedin.com/in/x', false], ['https://zoominfo.com', false],

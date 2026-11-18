@@ -9,7 +9,7 @@
 //
 // Feed parsing and the shared-platform filter come from src/intel.js, the same code the extension's live updater uses.
 import { createRequire } from 'node:module';
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, renameSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -20,6 +20,7 @@ const I = globalThis.PG_Intel, D = globalThis.PG_DATA;
 
 const args = process.argv.slice(2);
 const fromJson = args.includes('--from-json') ? args[args.indexOf('--from-json') + 1] : null;
+const outDir = args.includes('--out') ? args[args.indexOf('--out') + 1] : join(root, 'data'); // the Tripwire server writes to its state dir
 
 async function download(source) {
   for (const url of source.urls) {
@@ -62,7 +63,7 @@ for (const s of I.SOURCES) {
     return descKeys.get(k);
   };
   const { entries, count, skipped } = I.sourceEntries(data, descFor, extra);
-  allEntries.push(...entries);
+  for (const e of entries) allEntries.push(e); // not push(...entries): 100k+ arguments overflow the stack
   const sample = entries.find(([k]) => !k.startsWith('url:'));
   sources.push({ id: s.id, name: s.name, category: s.category, license: s.license, homepage: s.homepage,
     fetchedFrom: data.fetchedFrom || '', fetched: data.fetched || generated, count, skipped, sample: sample ? sample[0] : '' });
@@ -70,9 +71,12 @@ for (const s of I.SOURCES) {
 if (!sources.length) { console.error('No sources could be loaded; leaving the existing files alone.'); process.exit(1); }
 
 const idx = I.buildCompact(allEntries);
-mkdirSync(join(root, 'data'), { recursive: true });
-writeFileSync(join(root, 'data/threat-intel.bin'), I.serializeCompact(idx));
-writeFileSync(join(root, 'data/threat-intel.meta.json'), JSON.stringify({ format: 1, generated, total: idx.hi.length, descs, sources }, null, 1) + '\n');
+mkdirSync(outDir, { recursive: true });
+// Write to temporary names, then rename, so a reader never sees a half-written file.
+writeFileSync(join(outDir, 'threat-intel.bin.tmp'), I.serializeCompact(idx));
+writeFileSync(join(outDir, 'threat-intel.meta.json.tmp'), JSON.stringify({ format: 1, generated, total: idx.hi.length, descs, sources }, null, 1) + '\n');
+renameSync(join(outDir, 'threat-intel.bin.tmp'), join(outDir, 'threat-intel.bin'));
+renameSync(join(outDir, 'threat-intel.meta.json.tmp'), join(outDir, 'threat-intel.meta.json'));
 
 console.table(sources.map(({ id, category, count, skipped }) => ({ id, category, count, skipped })));
-console.log(`Wrote data/threat-intel.bin (${Math.round((8 + idx.hi.length * 8) / 1024)} KB, ${idx.hi.length} entries) and data/threat-intel.meta.json`);
+console.log(`Wrote threat-intel.bin (${Math.round((8 + idx.hi.length * 8) / 1024)} KB, ${idx.hi.length} entries) and threat-intel.meta.json to ${outDir}`);

@@ -357,6 +357,8 @@
     const freeOrBrand = verifiedBrand || D.FREE_MAIL.includes(A.registrableDomain(dom));
     // Block the whole fake domain, but only the single address if it's a shared provider like gmail.com
     await updateList('blocked', freeOrBrand ? sender.email : A.registrableDomain(dom), true);
+    // If the user opted in, share a fingerprint of the fake domain (never for shared providers like gmail.com).
+    if (!freeOrBrand) send({ type: 'pg-share-report', domain: A.registrableDomain(dom) });
     await updateList('trusted', sender.email, false);
     const s = await chrome.storage.local.get(['stats']);
     const st = s.stats || {}; st.reported = (st.reported || 0) + 1;

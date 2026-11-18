@@ -18,15 +18,53 @@ const CONTENT_CSS = ['src/content.css'];
 const GUARD_JS = ['src/data.js', 'src/analyzer.js', 'src/intel.js', 'src/guard.js'];
 const MANIFEST_HOSTS = (chrome.runtime.getManifest().content_scripts || []).flatMap((c) => c.matches);
 
+// The Tripwire server: a mirror of the threat list (rebuilt every 6 hours) and the opt-in community reports.
+const SERVER = 'https://tripwire.sparkv2.com';
+const REPORT_PREFIX = 'tripwire-report-v1|';
+
 // ---------------- threat index ----------------
 let indexPromise = null;
 
 async function loadBundled() {
+  // The server's copy, once downloaded, replaces the copy shipped with the extension.
+  try {
+    const c = await caches.open(CACHE);
+    const [m, b] = await Promise.all([c.match('/server/meta'), c.match('/server/bin')]);
+    if (m && b) return { meta: await m.json(), idx: I.parseCompact(await b.arrayBuffer()), origin: 'server' };
+  } catch (e) { /* fall back to the bundled copy */ }
   const [meta, bin] = await Promise.all([
     fetch(chrome.runtime.getURL('data/threat-intel.meta.json')).then((r) => r.json()),
     fetch(chrome.runtime.getURL('data/threat-intel.bin')).then((r) => r.arrayBuffer()),
   ]);
-  return { meta, idx: I.parseCompact(bin) };
+  return { meta, idx: I.parseCompact(bin), origin: 'bundled' };
+}
+
+// ---------------- community reports ----------------
+async function fingerprint(domain) {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(REPORT_PREFIX + domain));
+  return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+let communityPromise = null;
+function getCommunity() {
+  if (!communityPromise) {
+    communityPromise = (async () => {
+      const { communityEnabled } = await chrome.storage.local.get(['communityEnabled']);
+      if (communityEnabled === false) return null;
+      const r = await (await caches.open(CACHE)).match('/server/community');
+      if (!r) return null;
+      const j = await r.json();
+      return { hashes: new Set(j.hashes || []), threshold: j.threshold || 3, generated: j.generated };
+    })().catch(() => null);
+  }
+  return communityPromise;
+}
+// Only with the user's opt-in: send fingerprints (never the domain itself) of domains they reported.
+async function shareReport(domain) {
+  const { shareReports } = await chrome.storage.local.get(['shareReports']);
+  if (!shareReports || !domain) return { ok: false, reason: 'off' };
+  const res = await fetch(SERVER + '/v1/reports', { method: 'POST', credentials: 'omit', referrerPolicy: 'no-referrer',
+    headers: { 'content-type': 'application/json' }, body: JSON.stringify({ v: 1, hashes: [await fingerprint(domain)] }) });
+  return { ok: res.ok, status: res.status };
 }
 async function loadLive() {
   const out = {};
@@ -59,11 +97,11 @@ function buildIndex(bundled, live) {
     };
     if (live[s.id]) {
       const r = I.sourceEntries(live[s.id], descFor, extra);
-      fresh.push(...r.entries);
+      for (const e of r.entries) fresh.push(e); // not push(...entries): 100k+ arguments overflow the stack
       stats.push({ id: s.id, name: s.name, category: s.category, count: r.count, skipped: r.skipped, updated: live[s.id].fetched, origin: 'live' });
     } else {
       const m = meta.sources.find((x) => x.id === s.id);
-      stats.push(m ? { id: s.id, name: s.name, category: s.category, count: m.count, skipped: m.skipped, updated: m.fetched || meta.generated, origin: 'bundled' }
+      stats.push(m ? { id: s.id, name: s.name, category: s.category, count: m.count, skipped: m.skipped, updated: m.fetched || meta.generated, origin: bundled.origin || 'bundled' }
         : { id: s.id, name: s.name, category: s.category, count: 0, skipped: 0, updated: null, origin: 'missing' });
     }
   }
@@ -86,12 +124,18 @@ function getIndex() {
 }
 
 async function lookup(hosts, urls) {
-  const { idx, descs } = await getIndex();
+  const [{ idx, descs }, community] = await Promise.all([getIndex(), getCommunity()]);
   const hits = {};
   for (const host of (hosts || []).slice(0, 2000)) {
     for (const h of I.hostAndParents(host)) {
       const d = I.lookupCompact(idx, h);
       if (d >= 0) { hits[host] = Object.assign({ matched: h }, descs[d]); break; }
+    }
+    if (!hits[host] && community && community.hashes.size) {
+      const reg = A.registrableDomain(host);
+      if (community.hashes.has(await fingerprint(reg))) {
+        hits[host] = { cat: 'community', source: 'Tripwire community reports', threshold: community.threshold, matched: reg };
+      }
     }
   }
   for (const u of (urls || []).slice(0, 2000)) {
@@ -101,10 +145,41 @@ async function lookup(hosts, urls) {
   return hits;
 }
 
+// Download the threat list from the Tripwire server (one ~1.5 MB file). Returns true on success.
+async function updateFromServer(c) {
+  const opts = { cache: 'no-store', credentials: 'omit', referrerPolicy: 'no-referrer' };
+  try {
+    const [m, b] = await Promise.all([fetch(SERVER + '/v1/intel/threat-intel.meta.json', opts), fetch(SERVER + '/v1/intel/threat-intel.bin', opts)]);
+    if (!m.ok || !b.ok) return false;
+    const meta = await m.json(), bin = await b.arrayBuffer();
+    if (I.parseCompact(bin).hi.length !== meta.total || meta.total < 1000) return false; // incomplete or damaged
+    await c.put('/server/meta', new Response(JSON.stringify(meta), { headers: { 'content-type': 'application/json' } }));
+    await c.put('/server/bin', new Response(bin));
+    for (const s of I.SOURCES) await c.delete('/live/' + s.id); // the server copy is newer than any per-feed copy
+    return true;
+  } catch (e) { return false; }
+}
+async function updateCommunity(c) {
+  const { communityEnabled } = await chrome.storage.local.get(['communityEnabled']);
+  communityPromise = null;
+  if (communityEnabled === false) { await c.delete('/server/community'); return; }
+  try {
+    const r = await fetch(SERVER + '/v1/community.json', { cache: 'no-store', credentials: 'omit', referrerPolicy: 'no-referrer' });
+    if (r.ok) await c.put('/server/community', new Response(await r.text(), { headers: { 'content-type': 'application/json' } }));
+  } catch (e) { /* keep the previous copy */ }
+}
+
 async function updateFeeds() {
   const { useFeed } = await chrome.storage.local.get(['useFeed']);
   if (useFeed === false) return { ok: false, reason: 'disabled' };
   const c = await caches.open(CACHE);
+  await updateCommunity(c);
+  if (await updateFromServer(c)) {
+    indexPromise = null;
+    await chrome.storage.local.set({ intelUpdated: Date.now() });
+    return { ok: true, updated: I.SOURCES.length, total: I.SOURCES.length, via: 'server' };
+  }
+  // Server unreachable: download the public feeds directly, as before.
   let okCount = 0;
   for (const s of I.SOURCES) {
     for (const url of s.urls) {
@@ -121,9 +196,10 @@ async function updateFeeds() {
       } catch (e) { /* try next mirror */ }
     }
   }
+  if (okCount) { try { await c.delete('/server/meta'); await c.delete('/server/bin'); } catch (e) { /* none */ } }
   indexPromise = null;
   await chrome.storage.local.set({ intelUpdated: Date.now() }); // tells open tabs to re-check
-  return { ok: okCount > 0, updated: okCount, total: I.SOURCES.length };
+  return { ok: okCount > 0, updated: okCount, total: I.SOURCES.length, via: 'feeds' };
 }
 
 // ---------------- shortened links ----------------
@@ -337,6 +413,8 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
     case 'pg-enable-site': return run(enableSite(msg.origin, msg.tabId).then(() => ({ ok: true })));
     case 'pg-disable-site': return run(disableSite(msg.origin).then(() => ({ ok: true })));
     case 'pg-sync-guard': return run(syncGuard().then(() => ({ ok: true })));
+    case 'pg-share-report': return run(shareReport(msg.domain).catch(() => ({ ok: false })));
+    case 'pg-community-changed': return run((async () => { await updateCommunity(await caches.open(CACHE)); return { ok: true }; })());
     case 'pg-open-risky':
       return run(chrome.tabs.create({ url: msg.url, index: sender.tab ? sender.tab.index + 1 : undefined })
         .then((tab) => rememberRiskyOpen(tab.id, msg.url, msg.level)).then(() => ({ ok: true })));

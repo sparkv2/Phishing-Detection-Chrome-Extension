@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.3.0 (2026-11-18)
+- **Tripwire server** at `tripwire.sparkv2.com` (see `server/`). Live list updates now download one compact file from the server, which rebuilds it from the public feeds every 6 hours. If the server is down, the extension downloads the feeds directly, as before.
+- **Community reports.** An opt-in setting, **Share my reports anonymously**, sends a SHA-256 fingerprint of a reported scam domain, and nothing else. Domains reported from 3 or more different networks get a yellow warning for every Tripwire user. They're never shown as a confirmed (red) scam.
+- **Fix:** live feed updates no longer crash on very large lists (a stack overflow when merging more than 100,000 entries).
+- The privacy policy has been updated to describe the server.
+
 ## 1.2.0 (2026-11-18)
 
 ### Detection

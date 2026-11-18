@@ -14,7 +14,7 @@ let currentHost = null;
 const ALL_SITES = ['https://*/*', 'http://*/*'];
 
 async function render() {
-  const s = await chrome.storage.local.get(['enabled', 'stats', 'trusted', 'blocked', 'useFeed', 'enabledHosts', 'disabledHosts',
+  const s = await chrome.storage.local.get(['enabled', 'stats', 'trusted', 'blocked', 'useFeed', 'communityEnabled', 'shareReports', 'enabledHosts', 'disabledHosts',
     'expandLinks', 'guardEnabled', 'pwAlert', 'aiEnabled', 'health']);
   renderExtras(s);
   const st = s.stats || {};
@@ -26,6 +26,8 @@ async function render() {
   renderList('trustList', 'trustCount', s.trusted || [], 'trusted', 'No trusted senders yet.');
   renderList('blockList', 'blockCount', s.blocked || [], 'blocked', 'You haven\'t reported anyone yet.');
   $('useFeed').checked = s.useFeed !== false;
+  $('communityEnabled').checked = s.communityEnabled !== false;
+  $('shareReports').checked = !!s.shareReports;
   renderIntel(s); // don't wait on the (possibly large) list load
   await renderStatus(s);
 }
@@ -47,7 +49,7 @@ async function renderIntel(s) {
     const meta = document.createElement('span');
     meta.className = 'muted';
     meta.textContent = x.origin === 'missing' ? 'not loaded' :
-      `${x.count.toLocaleString()} · ${x.origin === 'live' ? 'updated' : 'bundled'} ${x.updated ? new Date(x.updated).toLocaleDateString() : ''}`;
+      `${x.count.toLocaleString()} · ${({ live: 'updated', server: 'via Tripwire server' })[x.origin] || 'bundled'} ${x.updated ? new Date(x.updated).toLocaleDateString() : ''}`;
     li.append(name, meta); ul.append(li);
   }
 }
@@ -175,6 +177,11 @@ $('useFeed').onchange = async (e) => {
   if (e.target.checked) await chrome.runtime.sendMessage({ type: 'pg-update-feed' });
   render();
 };
+$('communityEnabled').onchange = async (e) => {
+  await chrome.storage.local.set({ communityEnabled: e.target.checked });
+  await chrome.runtime.sendMessage({ type: 'pg-community-changed' });
+};
+$('shareReports').onchange = async (e) => { await chrome.storage.local.set({ shareReports: e.target.checked }); };
 $('feedBtn').onclick = async () => {
   $('feedBtn').disabled = true; $('feedBtn').textContent = 'Updating…';
   const r = await chrome.runtime.sendMessage({ type: 'pg-update-feed' });
