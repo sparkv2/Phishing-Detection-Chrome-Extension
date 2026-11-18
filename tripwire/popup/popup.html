@@ -17,6 +17,11 @@
     </label>
   </header>
 
+  <div id="healthBox" class="box warn" hidden>
+    <p><b>Tripwire can't read <span id="healthSite"></span> right now.</b> The site may have changed its layout, so some emails may not be checked. Stay careful, and check back after an update.</p>
+    <p class="muted" id="healthDetail"></p>
+  </div>
+
   <div id="siteBox" class="box" hidden>
     <p id="siteText"></p>
     <button id="siteBtn" class="btn"></button>
@@ -35,6 +40,15 @@
     <p><span class="dot y"></span><b>Yellow</b> — suspicious: it has warning signs but isn't a confirmed scam. Check the sender and links before doing anything.</p>
     <p><span class="dot g"></span>No colour — no warning signs found.</p>
     <p class="muted">Open any email to see a summary, a safety score (0 = phishing, 100 = safe) and the reasons.</p>
+  </details>
+
+  <details class="box">
+    <summary>Extra protection</summary>
+    <label class="row"><input type="checkbox" id="expandLinks"> Check where shortened links (bit.ly…) lead before you open them. Tripwire asks the link service for the destination; the page itself isn't opened.</label>
+    <label class="row"><input type="checkbox" id="guardEnabled"> Protect the pages I open: warn on fake login pages and known scam sites. <span class="muted">Needs permission to run on all websites.</span></label>
+    <label class="row sub"><input type="checkbox" id="pwAlert"> Password alert: warn if I type my Google, Microsoft or Yahoo password on another site. <span class="muted">Stores only a scrambled fragment, never the password.</span></label>
+    <label class="row"><input type="checkbox" id="aiEnabled"> On-device AI check: Chrome's built-in model reads opened emails (any language) and writes the summary. <span class="muted" id="aiStatus"></span></label>
+    <p class="muted"><a href="#" id="practiceLink">Practice spotting phishing →</a></p>
   </details>
 
   <details class="box">
@@ -57,6 +71,7 @@
   </details>
 
   <div class="tip" id="tip"></div>
+  <script src="../offscreen/ai.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>

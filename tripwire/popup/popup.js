@@ -11,8 +11,12 @@ $('tip').textContent = TIPS[Math.floor(Math.random() * TIPS.length)];
 
 let currentHost = null;
 
+const ALL_SITES = ['https://*/*', 'http://*/*'];
+
 async function render() {
-  const s = await chrome.storage.local.get(['enabled', 'stats', 'trusted', 'blocked', 'useFeed', 'enabledHosts', 'disabledHosts']);
+  const s = await chrome.storage.local.get(['enabled', 'stats', 'trusted', 'blocked', 'useFeed', 'enabledHosts', 'disabledHosts',
+    'expandLinks', 'guardEnabled', 'pwAlert', 'aiEnabled', 'health']);
+  renderExtras(s);
   const st = s.stats || {};
   $('enabled').checked = s.enabled !== false;
   $('sScanned').textContent = st.scanned || 0;
@@ -71,13 +75,28 @@ async function renderStatus(s) {
   let info = null;
   try { info = await chrome.tabs.sendMessage(tab.id, { type: 'pg-status' }); } catch (e) { info = null; }
   $('siteBox').hidden = true;
+  renderHealth(s, info);
   if (s.enabled === false) { status.textContent = 'Protection is OFF'; status.className = 'status off'; return; }
-  if (!info) { status.textContent = 'Not available on this page'; status.className = 'status'; return; }
+  let url = null; try { url = new URL(tab.url); } catch (e) { url = null; }
+  if (!info) {
+    status.textContent = 'Not an email page'; status.className = 'status';
+    // Tripwire only runs on well-known webmail sites until you turn it on for another one.
+    if (url && /^https?:$/.test(url.protocol)) {
+      showSite(`Is ${url.host} your email website? Let Tripwire check emails here.`, 'Check emails on this site', async () => {
+        const origin = url.origin;
+        const ok = await chrome.permissions.request({ origins: [origin + '/*'] });
+        if (!ok) return;
+        await chrome.runtime.sendMessage({ type: 'pg-enable-site', origin, tabId: tab.id });
+      });
+    }
+    return;
+  }
   currentHost = info.host;
   if (info.active) {
     status.textContent = `Protecting ${info.provider || 'this site'}`; status.className = 'status on';
     if (!info.known) showSite(`Tripwire is checking emails on ${info.host}.`, 'Stop checking this site', async () => {
-      await toggleHost('enabledHosts', info.host, false); await toggleHost('disabledHosts', info.host, true);
+      await toggleHost('disabledHosts', info.host, true);
+      if (url && (s.enabledHosts || []).includes(info.host)) await chrome.runtime.sendMessage({ type: 'pg-disable-site', origin: url.origin });
     });
   } else {
     status.textContent = 'Not an email page'; status.className = 'status';
@@ -86,6 +105,60 @@ async function renderStatus(s) {
     });
   }
 }
+
+function renderHealth(s, info) {
+  const health = s.health || {};
+  const label = { gmail: 'Gmail', outlook: 'Outlook', yahoo: 'Yahoo Mail' };
+  const broken = Object.entries(health).filter(([id, h]) => !h.ok && Date.now() - h.lastFail < 3 * 86400000
+    && (!info || !info.provider || label[id] === info.provider));
+  $('healthBox').hidden = !broken.length;
+  if (!broken.length) return;
+  $('healthSite').textContent = broken.map(([id]) => label[id] || id).join(', ');
+  $('healthDetail').textContent = broken.map(([, h]) => `Since ${new Date(h.lastFail).toLocaleString()}: ${h.detail}.`).join(' ');
+}
+
+// ---------- extra protection ----------
+async function renderExtras(s) {
+  $('expandLinks').checked = s.expandLinks !== false;
+  const granted = await chrome.permissions.contains({ origins: ALL_SITES });
+  $('guardEnabled').checked = !!s.guardEnabled && granted;
+  $('pwAlert').checked = !!(s.pwAlert && s.pwAlert.enabled);
+  $('pwAlert').disabled = !$('guardEnabled').checked;
+  $('aiEnabled').checked = !!s.aiEnabled;
+  const a = await PG_AI.availability();
+  $('aiStatus').textContent = { unsupported: 'Not supported by this browser.', unavailable: 'Not available on this computer (needs Chrome 138+ and a capable device).',
+    downloadable: 'The model will download (about 2 GB) when you turn this on.', downloading: 'The model is downloading…', available: 'Ready.' }[a] || '';
+  $('aiEnabled').disabled = a === 'unsupported' || a === 'unavailable';
+}
+$('expandLinks').onchange = async (e) => { await chrome.storage.local.set({ expandLinks: e.target.checked }); };
+$('guardEnabled').onchange = async (e) => {
+  if (e.target.checked) {
+    const ok = await chrome.permissions.request({ origins: ALL_SITES });
+    if (!ok) { e.target.checked = false; return; }
+    await chrome.storage.local.set({ guardEnabled: true });
+  } else {
+    await chrome.storage.local.set({ guardEnabled: false, pwAlert: { enabled: false, entries: [] } });
+    try { await chrome.permissions.remove({ origins: ALL_SITES }); } catch (err) { /* still needed */ }
+  }
+  await chrome.runtime.sendMessage({ type: 'pg-sync-guard' });
+  render();
+};
+$('pwAlert').onchange = async (e) => {
+  // Turning it off also forgets the stored fragments. They're re-learnt next time you sign in to your email.
+  const cur = (await chrome.storage.local.get(['pwAlert'])).pwAlert || { entries: [] };
+  await chrome.storage.local.set({ pwAlert: { enabled: e.target.checked, entries: e.target.checked ? cur.entries || [] : [] } });
+};
+$('aiEnabled').onchange = async (e) => {
+  if (e.target.checked) {
+    $('aiStatus').textContent = 'Preparing the on-device model…';
+    try { await PG_AI.session((p) => { $('aiStatus').textContent = `Downloading the model… ${Math.round(p * 100)}%`; }); } catch (err) {
+      e.target.checked = false; $('aiStatus').textContent = 'Couldn\'t start the on-device model: ' + err.message; return;
+    }
+  }
+  await chrome.storage.local.set({ aiEnabled: e.target.checked });
+  render();
+};
+$('practiceLink').onclick = (e) => { e.preventDefault(); chrome.tabs.create({ url: chrome.runtime.getURL('practice/practice.html') }); };
 function showSite(text, label, fn) {
   $('siteBox').hidden = false; $('siteText').textContent = text; $('siteBtn').textContent = label;
   $('siteBtn').onclick = async () => { await fn(); setTimeout(render, 400); };

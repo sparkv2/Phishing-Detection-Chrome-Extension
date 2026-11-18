@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tripwire Practice</title>
+<style>
+  :root { --fg:#1f2328; --muted:#57606a; --bg:#fff; --soft:#f6f8fa; --line:#d8dee4; --accent:#1f6feb; --good:#1a7f37; --bad:#c62828; }
+  @media (prefers-color-scheme: dark) { :root { --fg:#e6edf3; --muted:#9da7b3; --bg:#0d1117; --soft:#161b22; --line:#30363d; --accent:#4493f8; --good:#3fb950; --bad:#f85149; } }
+  * { box-sizing: border-box; }
+  body { margin:0; font:16px/1.55 -apple-system,"Segoe UI",Roboto,Arial,sans-serif; color:var(--fg); background:var(--bg); }
+  main { max-width:720px; margin:0 auto; padding:32px 16px 48px; }
+  h1 { font-size:26px; margin:0 0 4px; } h1 .wire { color:#E24B4A; }
+  .lead { color:var(--muted); margin:0 0 20px; }
+  .progress { display:flex; justify-content:space-between; color:var(--muted); font-size:14px; margin-bottom:8px; }
+  .mail { border:1px solid var(--line); border-radius:10px; overflow:hidden; margin:0 0 18px; }
+  .mail .hd { background:var(--soft); padding:12px 16px; border-bottom:1px solid var(--line); }
+  .mail .subj { font-weight:700; font-size:17px; }
+  .mail .from { color:var(--muted); font-size:14px; word-break:break-all; }
+  .mail .bd { padding:14px 16px; }
+  .mail .bd p { margin:0 0 10px; }
+  .fake-link { color:var(--accent); text-decoration:underline; cursor:help; }
+  .att { display:inline-block; border:1px solid var(--line); border-radius:6px; padding:4px 10px; font-size:14px; margin:4px 6px 0 0; background:var(--soft); }
+  .qr { display:inline-grid; grid-template-columns:repeat(7,10px); gap:1px; padding:6px; background:#fff; border:1px solid var(--line); }
+  .qr i { width:10px; height:10px; background:#000; } .qr i.w { background:#fff; }
+  .hint { font-size:13px; color:var(--muted); margin-top:6px; }
+  .q { font-weight:700; margin:0 0 10px; }
+  .opts { display:grid; gap:8px; }
+  .opts button { text-align:left; font:inherit; padding:11px 14px; border-radius:8px; border:1px solid var(--line); background:var(--soft); color:var(--fg); cursor:pointer; }
+  .opts button:hover:not(:disabled) { border-color:var(--accent); }
+  .opts button.right { border-color:var(--good); outline:2px solid var(--good); }
+  .opts button.wrong { border-color:var(--bad); outline:2px solid var(--bad); }
+  .opts button:disabled { cursor:default; }
+  .feedback { margin-top:16px; padding:14px 16px; border-radius:10px; background:var(--soft); border-left:5px solid var(--accent); }
+  .feedback.good { border-left-color:var(--good); } .feedback.bad { border-left-color:var(--bad); }
+  .feedback ul { margin:6px 0 0; padding-left:20px; }
+  .yours { display:inline-block; font-size:12.5px; background:#fff6d6; color:#7a4a00; border-radius:999px; padding:2px 10px; margin-bottom:8px; }
+  .next { margin-top:14px; font:600 15px inherit; font-family:inherit; padding:10px 18px; border-radius:8px; border:0; background:var(--accent); color:#fff; cursor:pointer; }
+  .done { text-align:center; padding:30px 0; } .done .big { font-size:42px; font-weight:800; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Trip<span class="wire">wire</span> practice</h1>
+  <p class="lead">Short "spot the red flag" lessons. The answers and explanations come from the same checks Tripwire runs on your real emails. Every email here is made up.</p>
+  <div id="app"></div>
+</main>
+<script src="../src/data.js"></script>
+<script src="../src/analyzer.js"></script>
+<script src="lessons.js"></script>
+<script src="practice.js"></script>
+</body>
+</html>

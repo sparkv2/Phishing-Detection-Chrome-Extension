@@ -19,7 +19,7 @@
 </style>
 </head>
 <body>
-<nav><b>Inbox</b><p style="padding:6px 10px;color:#5f6368">Demo mailbox for testing Tripwire. All emails are fake; links point to harmless .example or real company addresses.</p></nav>
+<nav><b>Inbox</b><p><button id="compose" type="button">Compose</button></p><p style="padding:6px 10px;color:#5f6368">Demo mailbox for testing Tripwire. All emails are fake; links point to harmless .example or real company addresses.</p></nav>
 <div class="wrap">
   <div role="listbox" id="list"></div>
   <div role="main" id="view"><p style="color:#5f6368">Select an email to read it.</p></div>
@@ -51,6 +51,11 @@ EMAILS.forEach((m, i) => {
   };
   list.append(row);
 });
+// Compose box built like Outlook's (labelled "Message body"). Tripwire must NOT show a banner here.
+document.getElementById('compose').onclick = () => {
+  view.innerHTML = `<div class="hdr"><h2>New message</h2></div><hr>
+    <div aria-label="Message body" contenteditable="true" style="min-height:200px;border:1px solid #ddd;padding:10px">Hi, please verify your account and confirm your password urgently. Draft text for testing.</div>`;
+};
 </script>
 </body>
 </html>

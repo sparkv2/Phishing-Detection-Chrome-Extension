@@ -1,0 +1,13 @@
+{
+  "name": "tripwire",
+  "version": "1.2.0",
+  "private": true,
+  "description": "Chrome extension that spots phishing emails in webmail. Checks run privately on the device.",
+  "license": "MIT",
+  "scripts": {
+    "test": "node --test \"test/**/*.test.js\"",
+    "build:intel": "node tools/build-threat-intel.mjs",
+    "package": "node tools/package.mjs"
+  },
+  "engines": { "node": ">=20" }
+}
