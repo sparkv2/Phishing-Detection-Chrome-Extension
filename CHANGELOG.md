@@ -25,7 +25,7 @@
 - **Node build script** (`tools/build-threat-intel.mjs`) replaces the PowerShell one. A weekly GitHub Action rebuilds the list and opens a pull request.
 - **Packaging** for Chrome, Edge and Firefox: `npm run package`.
 - Practice mode: "spot the red flag" lessons built on the real analyzer.
-- Added LICENSE (MIT), this changelog and STORE_LISTING.md.
+- Added LICENSE (MIT), this changelog, STORE_LISTING.md and a privacy policy (PRIVACY.md).
 
 ## 1.1.0
 - Threat-intelligence list compiled from OpenPhish, phishing-filter, CERT Polska, URLhaus, Feodo Tracker, botnet-filter and C2IntelFeeds. Live updates every 12 hours.

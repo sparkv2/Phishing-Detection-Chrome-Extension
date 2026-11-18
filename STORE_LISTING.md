@@ -42,6 +42,9 @@ Detect phishing and fraud in webmail and warn the user before they act on it.
 | Host: link shorteners | Asks the shortener where a link goes (see `webRequest`). |
 | Optional: all sites | Requested only if the user turns on "Protect the pages I open" or enables an extra webmail site. |
 
+## Privacy policy URL
+https://github.com/sparkv2/Phishing-Detection-Chrome-Extension/blob/main/PRIVACY.md
+
 ## Privacy practices (data disclosure form)
 - Does not collect or transmit personal data, email content, browsing history or authentication information.
 - Data stays on the device: settings, counts, trusted and reported lists, salted hashes of past senders, and (if password alert is on) a 4-byte fragment of a slow salted hash of the user's email password.

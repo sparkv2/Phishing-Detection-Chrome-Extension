@@ -85,6 +85,7 @@ About 193,000 known-bad domains, IPs and URLs, compiled from free public feeds:
 The content script runs only on known webmail sites (Gmail, Outlook, Yahoo, AOL, Proton, Zoho, Fastmail, iCloud). On any other webmail, click the toolbar icon → **Check emails on this site**. Chrome asks for permission for that one site. Turning on **Protect the pages I open** asks for all-sites access. Turning it off gives it back. See `STORE_LISTING.md` for a justification of each permission.
 
 ## Privacy
+The full policy is in [PRIVACY.md](PRIVACY.md). In short:
 - All analysis happens on the device. No email content, sender or URL is ever sent to a server.
 - Network requests: public threat-list downloads (can be turned off), redirect lookups at link shorteners for links you click (can be turned off), Gmail's own "Show original" and attachment pages (same site, your session), and re-fetching images already shown in the email (for QR codes).
 - Stored on the device: settings, counts, trusted and reported lists, the downloaded threat lists, salted hashes of past senders, which kinds of warning signs you've received (for practice mode), and, only if password alert is on, a 4-byte fragment of a slow salted hash of your mail password.
