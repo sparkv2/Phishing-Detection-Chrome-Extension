@@ -1,4 +1,4 @@
-﻿# Rebuilds the bundled threat list from the public feeds every week and opens a pull request with the result.
+# Rebuilds the bundled threat list from the public feeds every week and opens a pull request with the result.
 # The extension also refreshes the lists itself every 12 hours; this keeps the offline copy recent.
 name: Refresh threat list
 on:
@@ -13,9 +13,6 @@ permissions:
 jobs:
   refresh:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: tripwire
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
