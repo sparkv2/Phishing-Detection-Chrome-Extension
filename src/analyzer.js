@@ -14,7 +14,10 @@
 //   5. Thread      threadSignals      a reply from a different / look-alike company mid-conversation
 //   6. Links       analyzeLink        where each link and QR code really goes
 //   7. Attachments analyzeAttachments disguised programs, web-page attachments, login forms
+//   +  Raw message inspectRawMessage  header / signature / script tricks only visible in the raw email (Gmail)
 //   8. Scoring     each group adds a capped penalty; red is reserved for *confirmed* threats only
+//
+// Accuracy is measured with tools/eval-dataset.mjs against a folder of real emails (e.g. the EPVME dataset).
 //
 // Every signal looks like: { id, category, weight, title, explain, evidence, target }
 //   weight  how much it lowers the score;  target  where the banner's "Show me" button points on the page.
@@ -347,6 +350,149 @@
     return 'unknown';
   }
 
+  // ---------- the raw message (Gmail's "Show original") ----------
+  // Some attacks only show in the raw email, not in what the mail page displays. Measured on the EPVME dataset of
+  // ~49k malicious emails (see tools/eval-dataset.mjs), these structural tricks are common there and essentially
+  // absent from ordinary mail, so each is a strong sign on its own.
+
+  // base64 / quoted-printable -> text, working the same in browsers and Node.
+  function decodeTransfer(raw, encoding, charset) {
+    let bytes;
+    try {
+      if (/base64/i.test(encoding)) {
+        // Mail apps tolerate bad padding ("...YQ==="), and attackers use it; atob doesn't, so re-pad first.
+        const b = raw.replace(/[^A-Za-z0-9+/]/g, '');
+        bytes = Uint8Array.from(atob(b + '='.repeat((4 - (b.length % 4)) % 4)), (c) => c.charCodeAt(0));
+      }
+      else if (/quoted-printable/i.test(encoding)) {
+        const s = raw.replace(/=\r?\n/g, '').replace(/=([0-9a-f]{2})/gi, (m, h) => String.fromCharCode(parseInt(h, 16)));
+        bytes = Uint8Array.from(s, (c) => c.charCodeAt(0) & 0xff);
+      } else return raw;
+      return new TextDecoder(/utf-?8/i.test(charset || '') ? 'utf-8' : 'latin1').decode(bytes);
+    } catch (e) { return raw; }
+  }
+  // RFC 2047 encoded words in headers: =?utf-8?B?...?= / =?iso-8859-1?Q?...?=
+  function decodeWords(s) {
+    return (s || '').replace(/=\?([^?]+)\?([bq])\?([^?]*)\?=/gi, (_, cs, enc, txt) =>
+      decodeTransfer(enc.toLowerCase() === 'b' ? txt : txt.replace(/_/g, ' '), enc.toLowerCase() === 'b' ? 'base64' : 'quoted-printable', cs));
+  }
+  function headerLines(block) { // [{ name, value, indented }], folded lines joined
+    const out = [];
+    for (const line of block.split(/\r?\n/)) {
+      if (/^[ \t]/.test(line) && out.length && !/^\s+[\w-]+:/.test(line)) { out[out.length - 1].value += ' ' + line.trim(); continue; }
+      const m = line.trim().match(/^([\w-]+):\s?(.*)$/);
+      if (m) out.push({ name: m[1].toLowerCase(), value: m[2], indented: /^[ \t]/.test(line) });
+    }
+    return out;
+  }
+  const mparam = (v, name) => { const m = (v || '').match(new RegExp(name + '\\s*=\\s*"?([^";]+)"?', 'i')); return m ? m[1].trim() : ''; };
+
+  // Splits a MIME message into its parts. Returns:
+  //   { headers, type, parts: [{ type, headers, body (decoded), rawBody, parentType }], containers, preamble }
+  // `containers` lists every nested multipart ({ type, disposition, depth }); `preamble` is any text before the first
+  // part of the top-level multipart (normally just a stock sentence).
+  function parseMime(raw, depth, containers) {
+    depth = depth || 0;
+    containers = containers || [];
+    const sep = raw.search(/\r?\n\r?\n/);
+    const headers = headerLines(sep < 0 ? raw : raw.slice(0, sep));
+    const body = sep < 0 ? '' : raw.slice(sep).replace(/^\r?\n\r?\n/, '');
+    const get = (n) => (headers.find((h) => h.name === n) || {}).value || '';
+    const type = get('content-type') || 'text/plain';
+    const boundary = /^\s*multipart\//i.test(type) && mparam(type, 'boundary');
+    if (!boundary || depth > 6) {
+      return { headers, type, containers, parts: [{ type, headers, body: decodeTransfer(body, get('content-transfer-encoding'), mparam(type, 'charset')), rawBody: body }], preamble: '' };
+    }
+    if (depth > 0) containers.push({ type, disposition: get('content-disposition'), depth });
+    const chunks = body.split('--' + boundary);
+    const parts = [];
+    for (const c of chunks.slice(1)) {
+      if (c.startsWith('--')) break; // closing boundary
+      const sub = parseMime(c.replace(/^\r?\n/, ''), depth + 1, containers);
+      parts.push(...sub.parts.map((p) => Object.assign(p, { parentType: p.parentType || type })));
+    }
+    return { headers, type, containers, parts, preamble: chunks[0] };
+  }
+
+  const ADDRESS_MARKUP = /<\s*(script|img|svg|iframe|body|style|a\s|div|object|embed|link|meta|input|form)\b|\bon[a-z]+\s*=|javascript:/i;
+  const SUBJECT_MARKUP = /<\s*(script|iframe|object|embed|svg)\b|<[^>]*\bon[a-z]+\s*=|javascript:/i;
+
+  // Finds the structural tricks in a raw message. Returns flags for rawMessageSignals().
+  function inspectRawMessage(raw) {
+    if (!raw) return null;
+    const mime = parseMime(String(raw).slice(0, 2000000));
+    const hs = mime.headers;
+    const froms = hs.filter((h) => h.name === 'from');
+    const out = {};
+    // Two or more From lines (counting an indented one injected above the real header).
+    out.multipleFrom = froms.length > 1;
+    // A whole address hidden inside an encoded word (names are encoded normally; addresses never need to be).
+    for (const f of froms) for (const m of f.value.matchAll(/=\?[^?]+\?[bq]\?[^?]*\?=/gi)) if (/@/.test(decodeWords(m[0]))) out.encodedAddress = decodeWords(m[0]).trim().slice(0, 80);
+    // HTML tags, event handlers or javascript: inside address headers (never legitimate there), or clearly malicious
+    // markup in the Subject (a plain tag name can appear when people discuss HTML: "Re: <div> tags in Gmail").
+    out.headerMarkup = hs.some((h) => (['from', 'to', 'cc', 'reply-to', 'sender'].includes(h.name) && ADDRESS_MARKUP.test(decodeWords(h.value)))
+      || (h.name === 'subject' && SUBJECT_MARKUP.test(decodeWords(h.value))));
+    // Scripts in the email's HTML (mail clients strip them, but they are never there by accident).
+    out.script = mime.parts.some((p) => /html/i.test(p.type) && /<script\b|\bon(error|load|click|mouseover|mouseenter|focus)\s*=|href\s*=\s*["']?\s*javascript:/i.test(p.body));
+    // Signed email with a tampered signature: missing, or far too short to hold a real certificate and signature
+    // (genuine S/MIME signatures are thousands of characters), or with unsigned text placed before the signed part.
+    if (/^\s*multipart\/signed/i.test(mime.type)) {
+      const sigPart = mime.parts.find((p) => /pkcs7-signature/i.test(p.type));
+      const pgp = /pgp-signature/i.test(mime.type);
+      const sigLen = sigPart ? (sigPart.rawBody || '').replace(/\s+/g, '').length : 0;
+      out.brokenSignature = !pgp && sigLen < 400;
+      // Mail programs write stock notes here ("This is a multi-part message...", "It has been signed conforming to
+      // RFC2015. You'll need PGP or GPG to check the signature."), so those sentences don't count.
+      const pre = (mime.preamble || '')
+        .replace(/this is (an s\/mime signed|a multi-?part|an openpgp\/mime signed) message[^\n]*/gi, '')
+        .replace(/[^\n.]*(signed conforming to rfc|(pgp|gpg) or (pgp|gpg)|check the signature|signature (below|attached))[^\n]*/gi, '')
+        .trim();
+      out.unsignedPreamble = pre.length > 40;
+    }
+    // A signed message tucked inside the email and deliberately hidden: forged text is shown on top while the mail
+    // app still shows a "signed" badge. Hidden with CSS / the obsolete <plaintext> tag, or labelled as an attachment.
+    // (A signed message nested inside on its own is normal: mailing lists wrap signed posts to add a footer.)
+    const nestedSigned = mime.containers.filter((c) => /multipart\/signed/i.test(c.type));
+    if (nestedSigned.length) {
+      const asAttachment = nestedSigned.some((c) => /attachment/i.test(c.disposition));
+      const hidingCss = mime.parts.some((p) => /html/i.test(p.type) && /<plaintext\b|\{[^}]*display\s*:\s*none|style\s*=\s*["'][^"']*display\s*:\s*none/i.test(p.body))
+        || /<plaintext\b/i.test(mime.preamble || '') || mime.parts.some((p) => /<plaintext\b/i.test(p.body));
+      out.hiddenSignedPart = asAttachment || hidingCss;
+    }
+    return out;
+  }
+
+  function rawMessageSignals(raw) {
+    const out = [];
+    if (!raw) return out;
+    if (raw.multipleFrom) out.push(sig('multiple-from', 'sender', 45, 'The email has two different senders',
+      'This email carries more than one "From" line. Different mail apps show different ones, so you may see a trusted name while the email really comes from someone else. Real emails have exactly one.', 'two From headers', { type: 'sender' }));
+    if (raw.encodedAddress) out.push(sig('encoded-sender', 'sender', 35, 'The sender\'s address is hidden in encoded text',
+      `The From line hides an address inside encoded text ("${raw.encodedAddress}"). Encoding is used for names in other alphabets, never needed for an address: it is a trick to slip past checks.`, raw.encodedAddress, { type: 'sender' }));
+    if (raw.headerMarkup) out.push(sig('header-markup', 'sender', 45, 'Hidden code in the email\'s sender or subject',
+      'The sender, recipient or subject line contains web-page code. That is an attack on mail apps and never appears in a real email.', 'code in headers', { type: 'sender' }));
+    if (raw.script) out.push(sig('script-in-email', 'structure', 35, 'The email contains hidden scripts',
+      'The email\'s code includes scripts or "run on load" instructions. Mail apps block them, but their presence shows the email was built to attack, not to inform.', 'script in email'));
+    if (raw.brokenSignature) out.push(sig('broken-signature', 'structure', 40, 'Fake or damaged digital signature',
+      'This email claims to be digitally signed, but the signature is missing or far too short to be real. Attackers tamper with signatures so a mail app shows a "signed" badge on a forged email.', 'invalid S/MIME signature'));
+    if (raw.hiddenSignedPart) out.push(sig('hidden-signed-part', 'structure', 40, 'A signed message is hidden behind other text',
+      'This email contains a genuinely signed message, but hides it and shows you different text on top. Your mail app may still display a "signed" badge for the text you see, which the signature does not cover.', 'hidden signed part'));
+    if (raw.unsignedPreamble) out.push(sig('unsigned-content', 'structure', 35, 'Text added outside the signed part',
+      'Part of what you see sits outside the signed section of this email, so the signature does not vouch for it. This is how attackers add their own text to a genuinely signed email.', 'unsigned text before signed part'));
+    return out;
+  }
+
+  // Visible-header versions of two of the checks above, for every provider (no raw message needed).
+  const BIDI = /[‪-‮⁦-⁩‎‏]/;
+  function visibleHeaderSignals(sender, subject) {
+    const out = [];
+    if (ADDRESS_MARKUP.test(sender.name || '') || ADDRESS_MARKUP.test(sender.email || '') || SUBJECT_MARKUP.test(subject || '')) out.push(sig('header-markup', 'sender', 45,
+      'Hidden code in the email\'s sender or subject', 'The sender or subject line contains web-page code. That is an attack on mail apps and never appears in a real email.', 'code in headers', { type: 'sender' }));
+    if (BIDI.test(sender.name || '') || BIDI.test(sender.email || '')) out.push(sig('bidi-sender', 'sender', 45, 'The sender\'s name is reversed to disguise it',
+      'The sender contains an invisible character that flips the direction of the text, so the address you see is not the address that sent it.', 'text-direction trick', { type: 'sender' }));
+    return out;
+  }
+
   // ---------- sender ----------
   // Normalizes the From line into { name, email, domain }. Some pages only show "Name <address>" as text.
   function parseSender(name, email) {
@@ -541,9 +687,21 @@
   }
 
   // Text-only fallback when the page doesn't show an attachment list.
+  // A name that is really part of a web or email address ("example.com", "site.org/index.html", "bob@x.com") is
+  // not a file, so only names that stand on their own count. ".com" is skipped entirely: it's every other domain.
   function mentionedAttachment(body) {
-    const att = (body || '').match(D.RISKY_ATTACHMENT);
-    if (att && /(attach|download|open|file|document|invoice)/i.test(body)) {
+    const text = body || '';
+    const re = new RegExp(D.RISKY_ATTACHMENT.source, 'gi');
+    let att = null;
+    for (let m; (m = re.exec(text)) && !att;) {
+      if (/\.com$/i.test(m[0])) continue;
+      const end = m.index + m[0].length;
+      const word = (text.slice(0, end).match(/\S*$/)[0] + (text.slice(end).match(/^\S*/)[0]));
+      const continuesAsDomain = text[end] === '.' && /\w/.test(text[end + 1] || ''); // "something.js.org"
+      if (/[/@\\]|^(www\.|https?:)/i.test(word) || continuesAsDomain) continue;
+      att = m;
+    }
+    if (att && /(attach|download|open|file|document|invoice)/i.test(text)) {
       return sig('risky-attachment', 'attachment', 15, 'Mentions a risky file type',
         `The email refers to "${att[0].trim()}". Files like this can install harmful software when opened.`, att[0].trim());
     }
@@ -789,9 +947,16 @@
 
     // ----- 1. sender -----
     const s = analyzeSender(sender, lists, input.auth);
-    // Trusting a sender silences warnings about them, except known threats and failed anti-forgery checks:
-    // a forged From address can copy anyone, including people you trust.
-    const senderSignals = trusted ? s.signals.filter((x) => x.category === 'known' || x.id.startsWith('auth-fail')) : s.signals;
+    // Header and structure tricks: from the raw message when we have it (Gmail), otherwise from what the page shows.
+    const raw = input.rawMessage ? inspectRawMessage(input.rawMessage) : null;
+    const forgery = [...rawMessageSignals(raw), ...visibleHeaderSignals(sender, input.subject)];
+    const seenForgery = new Set();
+    const headerTricks = forgery.filter((x) => x.category === 'sender' && !seenForgery.has(x.id) && seenForgery.add(x.id));
+    const structureSignals = forgery.filter((x) => x.category === 'structure');
+    // Trusting a sender silences warnings about them, except known threats and signs of forgery: a forged
+    // sender can copy anyone, including people you trust.
+    const FORGERY = /^(auth-fail|multiple-from|encoded-sender|header-markup|bidi-sender)/;
+    const senderSignals = (trusted ? s.signals.filter((x) => x.category === 'known' || FORGERY.test(x.id)) : s.signals).concat(headerTricks);
 
     // ----- 2. wording -----
     const content = analyzeContent(input.subject, input.body);
@@ -895,8 +1060,9 @@
     if (linkWeights.length) linkPenalty = linkWeights[0] + linkWeights.slice(1).reduce((a, w) => a + w * 0.25, 0);
     linkPenalty += linkSignals.filter((x) => x.id === 'form').reduce((a, x) => a + x.weight, 0);
     linkPenalty = Math.min(linkPenalty, 70);
-    const attWeights = attachmentSignals.map((x) => x.weight).sort((a, b) => b - a);
-    const attachmentPenalty = Math.min(60, (attWeights[0] || 0) + attWeights.slice(1).reduce((a, w) => a + w * 0.25, 0));
+    const worstPlusQuarter = (list) => { const w = list.map((x) => x.weight).sort((a, b) => b - a); return (w[0] || 0) + w.slice(1).reduce((a, x) => a + x * 0.25, 0); };
+    const attachmentPenalty = Math.min(60, worstPlusQuarter(attachmentSignals));
+    const structurePenalty = Math.min(50, worstPlusQuarter(structureSignals)); // scripts, tampered signatures
     const aiPenalty = Math.min(32, aiSigs.reduce((a, x) => a + x.weight, 0));
     // Payment changes have their own bucket: they are the costliest scam, and their wording is often perfectly calm.
     const paymentPenalty = Math.min(55, paySignals.reduce((a, x) => a + x.weight, 0));
@@ -908,7 +1074,7 @@
     if (paymentPenalty && senderSignals.some((x) => /lookalike|thread-|new-address-for-name|auth-fail/.test(x.id))) comboTech = Math.max(comboTech, 20);
 
     const known = senderSignals.some((x) => x.category === 'known') || linkResults.some((r) => r.known);
-    let score = Math.round(100 - contentPenalty - senderPenalty - linkPenalty - attachmentPenalty - aiPenalty - paymentPenalty - comboTech);
+    let score = Math.round(100 - contentPenalty - senderPenalty - linkPenalty - attachmentPenalty - structurePenalty - aiPenalty - paymentPenalty - comboTech);
     // 0 is reserved for confirmed phishing; unconfirmed emails bottom out at 10 however many warning signs they have.
     score = known ? 0 : Math.max(10, Math.min(100, score));
 
@@ -921,7 +1087,7 @@
 
     // ----- the result -----
     // All reasons, most serious first (that is the order the banner shows them in).
-    const signals = [...senderSignals, ...linkSignals, ...attachmentSignals, ...paySignals, ...contentSignals, ...aiSigs].sort((a, b) => b.weight - a.weight);
+    const signals = [...senderSignals, ...linkSignals, ...attachmentSignals, ...structureSignals, ...paySignals, ...contentSignals, ...aiSigs].sort((a, b) => b.weight - a.weight);
     // Every reason gets a "Show me" target unless it already has one.
     for (const x of signals) {
       if (x.target) continue;
@@ -957,5 +1123,5 @@
 
   // Exported for the content script, background worker, page guard, server and tests.
   root.PG_Analyzer = { analyzeEmail, analyzeUrl, analyzeLink, analyzeAttachments, registrableDomain, lookalikeBrand, unwrapUrl, summarize,
-    parseSender, parseAuthResults, authVerdict, findBankDetails, lookalikeCandidates, looksLike };
+    parseSender, parseAuthResults, authVerdict, findBankDetails, lookalikeCandidates, looksLike, parseMime, inspectRawMessage, decodeWords };
 })(typeof globalThis !== 'undefined' ? globalThis : this);
