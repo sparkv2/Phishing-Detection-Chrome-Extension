@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.4.0 (2026-11-19)
+- **Reply-chain hijack detection.**
+  - In Gmail conversations, a reply from a different company than the earlier messages is flagged, strongly when it's a look-alike address.
+  - Anywhere, a new address that's a near-copy of a domain or address you regularly hear from is flagged, using fingerprints only.
+  - Fake "Re:" subjects from strangers are flagged.
+- **Payment-change alerts.**
+  - Detects requests to send money to a new account, scored separately because that scam's wording is often calm.
+  - Recognises IBANs, US routing numbers and UK sort codes by their checksums.
+  - Warns strongly when a known supplier's bank details differ from the ones they sent before.
+  - Gives specific advice to confirm by phone first.
+- **"Show me".** Each reason in the banner can scroll to and highlight the exact part of the email it's about.
+- **Webmail layout fixes without a new release.**
+  - Every site-specific selector now lives in `data/selectors.json`, the webmail layout rules.
+  - A change pushed to `main` is signed by GitHub Actions, mirrored by the Tripwire server, and verified by the extension, which picks it up at its next update.
+  - When the health check notices a site has broken, the extension looks for a fix immediately.
+  - Updated selectors are tried first and the built-in ones second, so a bad update can't make detection worse.
+- A practice lesson about invoice fraud.
+
 ## 1.3.1 (2026-11-18): security hardening
 - **Signed threat list.** GitHub Actions builds and signs the list every 6 hours. The server and the extension only accept it with a valid Ed25519 signature, a matching checksum, and a date that is newer than the current list and less than 3 days old. The signing key never touches the server.
 - **The extension never flags protected sites** (brands, free mail, trackers, shared platforms) as a whole, even if a downloaded list includes them.

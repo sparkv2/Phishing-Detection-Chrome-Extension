@@ -11,7 +11,7 @@ id tripwire >/dev/null 2>&1 || useradd --system --home-dir /var/lib/tripwire --s
 
 # Only what the server needs: shared detection data, the feed builder and the server itself.
 install -d -o root -g root -m 0755 /opt/tripwire /opt/tripwire/src /opt/tripwire/tools /opt/tripwire/server
-install -o root -g root -m 0644 "$SRC"/src/data.js "$SRC"/src/analyzer.js "$SRC"/src/intel.js /opt/tripwire/src/
+install -o root -g root -m 0644 "$SRC"/src/data.js "$SRC"/src/analyzer.js "$SRC"/src/intel.js "$SRC"/src/selectors.js /opt/tripwire/src/
 install -o root -g root -m 0644 "$SRC"/tools/build-threat-intel.mjs /opt/tripwire/tools/
 install -o root -g root -m 0644 "$SRC"/server/tripwire-server.mjs "$SRC"/server/db.mjs "$SRC"/server/fetch-intel.mjs \
   "$SRC"/server/tripwire-admin.mjs /opt/tripwire/server/

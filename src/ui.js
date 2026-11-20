@@ -52,6 +52,12 @@
   .ev { display: inline-block; margin-top: 4px; font: 12px/1.4 ui-monospace, Consolas, monospace; background: #fff;
     border: 1px solid #d0d7de; border-radius: 4px; padding: 1px 6px; word-break: break-all; }
   .more { background: none; border: 0; color: #0969da; cursor: pointer; padding: 4px 0; font: inherit; }
+  .evrow { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 4px; }
+  .evrow .ev { margin-top: 0; }
+  button.show { font: 600 12px/1 -apple-system, "Segoe UI", Roboto, Arial, sans-serif; padding: 5px 9px; border-radius: 999px; cursor: pointer;
+    border: 1px solid var(--c); background: #fff; color: var(--c); }
+  button.show:hover { background: var(--bg); }
+  button.show:focus-visible { outline: 2px solid #0969da; outline-offset: 2px; }
   .actions { display: flex; flex-wrap: wrap; gap: 8px; padding: 10px 16px 12px; border-top: 1px solid #eaeef2; }
   button.btn { font: 600 13px/1 inherit; font-family: inherit; padding: 9px 14px; border-radius: 6px; cursor: pointer;
     border: 1px solid #d0d7de; background: #f6f8fa; color: #1f2328; }
@@ -167,8 +173,18 @@
     // Why
     if (result.level !== 'safe' && result.signals.length) {
       const why = h('section', {}, h('h4', {}, result.level === 'phishing' ? 'Why this is dangerous' : 'Why this is suspicious'));
+      const showBtn = (x) => {
+        if (!x.target || !opts.onShow) return null;
+        const b = h('button', { class: 'show', type: 'button', title: 'Scroll to and highlight this in the email' }, 'Show me');
+        b.addEventListener('click', () => {
+          const n = opts.onShow(x);
+          b.textContent = n ? 'Shown ✓' : 'Not visible on the page';
+          setTimeout(() => { b.textContent = 'Show me'; }, 2500);
+        });
+        return b;
+      };
       const items = result.signals.map((x) => h('div', { class: 'reason' }, h('b', {}, x.title), x.explain,
-        x.evidence ? h('div', {}, h('span', { class: 'ev' }, x.evidence)) : null));
+        (x.evidence || x.target) ? h('div', { class: 'evrow' }, x.evidence ? h('span', { class: 'ev' }, x.evidence) : null, showBtn(x)) : null));
       items.slice(0, 4).forEach((i) => why.append(i));
       if (items.length > 4) {
         const rest = h('div', { hidden: true }, items.slice(4));
@@ -186,7 +202,8 @@
     }
 
     // What to do
-    const tips = result.level === 'safe' ? [TIPS.safe[Math.floor(Math.random() * TIPS.safe.length)]] : TIPS[result.high ? 'phishing' : result.level];
+    const general = result.level === 'safe' ? [TIPS.safe[Math.floor(Math.random() * TIPS.safe.length)]] : TIPS[result.high ? 'phishing' : result.level];
+    const tips = result.level === 'safe' ? general : [...(result.tips || []), ...general]; // advice for what was found comes first
     card.append(h('section', {}, h('h4', {}, result.level === 'safe' ? 'Safety tip' : 'What you should do'), h('ul', {}, tips.map((t) => h('li', {}, t)))));
 
     const note = h('div', { class: 'note', hidden: true });

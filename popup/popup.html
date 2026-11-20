@@ -18,7 +18,7 @@
   </header>
 
   <div id="healthBox" class="box warn" hidden>
-    <p><b>Tripwire can't read <span id="healthSite"></span> right now.</b> The site may have changed its layout, so some emails may not be checked. Stay careful, and check back after an update.</p>
+    <p><b>Tripwire can't read <span id="healthSite"></span> right now.</b> The site may have changed its layout, so some emails may not be checked. Tripwire looks for a published fix automatically. Until then, stay careful.</p>
     <p class="muted" id="healthDetail"></p>
   </div>
 
@@ -66,6 +66,7 @@
     <p class="muted">Every email is checked <b>on your computer</b>. Email content is never sent, saved or shared. Only counts and your own trusted/reported lists are stored, on this device.</p>
     <p class="muted" id="feedInfo">Loading threat lists…</p>
     <ul id="intelList" class="list intel"></ul>
+    <p class="muted" id="rulesInfo"></p>
     <label class="row"><input type="checkbox" id="useFeed"> Keep these lists up to date automatically (downloads the list from the Tripwire server, or the public lists if it's down; sends nothing about you)</label>
     <label class="row"><input type="checkbox" id="communityEnabled"> Warn about domains other Tripwire users reported (shown as yellow, never as confirmed)</label>
     <label class="row"><input type="checkbox" id="shareReports"> Share my reports anonymously: when I report an email, send only a fingerprint of the fake domain. Never the email, the address or anything about me. <span class="muted">Off unless you turn it on.</span></label>
@@ -74,6 +75,7 @@
 
   <div class="tip" id="tip"></div>
   <script src="../offscreen/ai.js"></script>
+  <script src="../src/selectors.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>

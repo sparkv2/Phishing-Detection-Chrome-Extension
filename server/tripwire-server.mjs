@@ -55,7 +55,8 @@ function readBody(req, limit) {
 }
 
 const INTEL_FILES = { 'threat-intel.bin': 'application/octet-stream', 'threat-intel.meta.json': 'application/json; charset=utf-8',
-  'threat-intel.meta.json.sig': 'text/plain; charset=utf-8' };
+  'threat-intel.meta.json.sig': 'text/plain; charset=utf-8',
+  'selectors.json': 'application/json; charset=utf-8', 'selectors.json.sig': 'text/plain; charset=utf-8' }; // webmail layout rules
 
 const server = createServer(async (req, res) => {
   const url = new URL(req.url, 'http://x');

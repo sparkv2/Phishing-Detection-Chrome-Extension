@@ -31,3 +31,19 @@ a.pg-risky-link {
 }
 
 .pg-banner-host { display: block; margin: 0 0 12px; }
+
+/* "Show me": the part of the email a warning is about */
+.pg-show {
+  outline: 3px solid #e6a700 !important;
+  outline-offset: 3px !important;
+  border-radius: 3px;
+  animation: pg-show-pulse 1s ease-in-out 3;
+}
+@keyframes pg-show-pulse {
+  0%, 100% { outline-color: #e6a700; }
+  50% { outline-color: #c62828; }
+}
+::highlight(tripwire-show) {
+  background-color: #ffd54f;
+  color: #1f2328;
+}

@@ -72,12 +72,61 @@ test('AI summary replaces the extractive summary and AI asks are merged', () => 
   assert.ok(r.asks.includes('Make a payment or share payment details'));
 });
 
+// ---------- payment changes & reply-chain hijack ----------
+test('bank details: valid IBAN / routing / sort code found, invalid numbers ignored', () => {
+  const found = A.findBankDetails('IBAN GB82 WEST 1234 5698 7654 32, bad IBAN GB00 WEST 1234 5698 7654 32, ' +
+    'routing number 021000021, routing 123456789, sort code 20-00-00 account number 55779911, order 4471.');
+  const types = found.map((b) => b.type + ':' + b.id);
+  assert.ok(types.includes('iban:GB82WEST12345698765432'), types.join());
+  assert.ok(!types.some((t) => t.startsWith('iban:GB00')), 'invalid IBAN accepted');
+  assert.ok(types.includes('routing:021000021'), types.join());
+  assert.ok(!types.includes('routing:123456789'), 'bad routing checksum accepted');
+  assert.ok(types.includes('sortcode:200000'), types.join());
+  assert.ok(types.includes('account:55779911'), types.join());
+});
+
+test('look-alike candidates include the real domain or address', () => {
+  assert.ok(A.lookalikeCandidates('dana@northwlnd-supplies.example').domains.includes('northwind-supplies.example'));
+  assert.ok(A.lookalikeCandidates('billing@acrne.com').domains.includes('acme.com'));
+  assert.ok(A.lookalikeCandidates('billing@acme.co').domains.includes('acme.com'));
+  assert.ok(A.lookalikeCandidates('j.smlth@gmail.com').addresses.includes('j.smith@gmail.com'));
+  assert.deepEqual(A.lookalikeCandidates('someone@gmail.com').domains, [], 'free-mail domains are compared by address, not domain');
+});
+
+test('hijacked thread with a payment change is very suspicious and gives specific advice', () => {
+  const c = C.EMAILS.find(([n]) => n.startsWith('Hijacked thread'))[1];
+  const r = A.analyzeEmail(Object.assign({ context: 'open' }, c), {});
+  assert.ok(r.high, describe(r));
+  assert.ok(r.signals.some((s) => s.id === 'thread-lookalike'));
+  assert.ok(r.signals.some((s) => s.id === 'payment-change'));
+  assert.ok(r.tips[0].startsWith('Before paying, call the company'));
+  assert.equal(r.asks[0], 'Send money to a new or different bank account');
+});
+
+test('fake "Re:" from a stranger is flagged', () => {
+  const r = A.analyzeEmail({ context: 'open', senderName: 'Kim', senderEmail: 'kim@unknown-vendor.example', subject: 'RE: your order',
+    body: 'As discussed, please see the details below.', links: [], history: { seenBefore: false, mature: true } }, {});
+  assert.ok(r.signals.some((s) => s.id === 'fake-reply'), describe(r));
+});
+
+test('every reason has a "Show me" target', () => {
+  const inputs = C.EMAILS.filter(([, , level]) => level !== 'safe').map(([, input]) => Object.assign({ context: 'open' }, input));
+  inputs.push({ context: 'open', senderName: 'X', senderEmail: 'x@y.example', subject: 's', body: 'b', links: [], hasForm: true,
+    attachments: [{ name: 'a.pdf.html' }], qrCodes: [{ data: 'https://micros0ft-login.example/x', src: 'https://img.example/qr.png' }] });
+  for (const input of inputs) {
+    const r = A.analyzeEmail(input, {});
+    for (const s of r.signals) if (s.category !== 'ai') assert.ok(s.target && s.target.type, `${s.id} in "${input.subject}" has no target`);
+  }
+  const qr = A.analyzeEmail(inputs[inputs.length - 1], {}).signals.find((s) => s.id === 'qr-code');
+  assert.deepEqual(qr.target, { type: 'image', src: 'https://img.example/qr.png' });
+});
+
 // ---------- practice lessons agree with the analyzer ----------
 require(join(root, 'practice/lessons.js'));
 for (const l of globalThis.TW_LESSONS) {
   test(`practice lesson ${l.id} is judged ${l.id.startsWith('safe') ? 'safe' : 'risky'}`, () => {
     const x = l.extra || {};
-    const r = A.analyzeEmail(Object.assign({ context: 'open' }, l.email, { auth: x.auth, attachments: x.attachments, qrCodes: x.qrCodes, history: x.history }),
+    const r = A.analyzeEmail(Object.assign({ context: 'open' }, l.email, { auth: x.auth, attachments: x.attachments, qrCodes: x.qrCodes, history: x.history, thread: x.thread }),
       { expanded: new Map(x.expanded || []) });
     if (l.id.startsWith('safe')) assert.equal(r.level, 'safe', describe(r));
     else assert.notEqual(r.level, 'safe', describe(r));

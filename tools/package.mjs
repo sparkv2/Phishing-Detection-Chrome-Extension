@@ -17,7 +17,7 @@ function manifestFor(target) {
   if (target === 'firefox') {
     // Firefox runs MV3 background scripts as an event page instead of a service worker, and has no offscreen
     // documents or built-in AI model, so the on-device AI option simply reports "not supported" there.
-    m.background = { scripts: ['src/data.js', 'src/analyzer.js', 'src/intel.js', 'vendor/jsQR.js', 'background.js'] };
+    m.background = { scripts: ['src/data.js', 'src/analyzer.js', 'src/intel.js', 'src/selectors.js', 'vendor/jsQR.js', 'background.js'] };
     m.permissions = m.permissions.filter((p) => p !== 'offscreen');
     m.browser_specific_settings = { gecko: { id: process.env.TRIPWIRE_GECKO_ID || 'tripwire@example.com', strict_min_version: '128.0' } };
     m.content_scripts = m.content_scripts.map((c) => Object.assign({}, c, { matches: c.matches.filter((x) => !x.startsWith('file:')) }));

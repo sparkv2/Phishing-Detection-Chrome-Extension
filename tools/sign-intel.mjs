@@ -25,8 +25,17 @@ if (args[0] === '--generate-key') {
   process.exit(0);
 }
 
-const dir = args[0];
 const pem = process.env.TRIPWIRE_SIGNING_KEY;
+// --file PATH: sign any file (used for data/selectors.json, the webmail layout rules) -> PATH.sig
+if (args[0] === '--file') {
+  const file = args[1];
+  if (!file || !pem) { console.error('usage: TRIPWIRE_SIGNING_KEY="<pem>" sign-intel.mjs --file PATH'); process.exit(2); }
+  writeFileSync(file + '.sig', sign(null, readFileSync(file), createPrivateKey(pem)).toString('base64') + '\n');
+  console.log(`Signed ${file}`);
+  process.exit(0);
+}
+
+const dir = args[0];
 if (!dir || !pem) { console.error('usage: TRIPWIRE_SIGNING_KEY="<pem>" sign-intel.mjs DIR'); process.exit(2); }
 const key = createPrivateKey(pem);
 const meta = readFileSync(join(dir, 'threat-intel.meta.json'));

@@ -2,13 +2,14 @@
 
 A small, dependency-free Node 22 service at `https://tripwire.sparkv2.com`. It does two things:
 
-1. **Signed threat-list mirror.** GitHub Actions (`.github/workflows/publish-intel.yml`) rebuilds the compact threat list from the public feeds every 6 hours, **signs it**, and publishes it as the `intel-latest` release. The server fetches it every hour (`server/fetch-intel.mjs`), checks the signature, and hands it out. Extensions download one 1.5 MB file instead of eight feeds, and check the signature again themselves.
+1. **Signed threat-list mirror.** GitHub Actions (`.github/workflows/publish-intel.yml`) rebuilds the compact threat list from the public feeds every 6 hours, **signs it**, and publishes it as the `intel-latest` release. The server fetches it every hour (`server/fetch-intel.mjs`), checks the signature, and hands it out. Extensions download one 1.5 MB file instead of eight feeds, and check the signature again themselves. The same release carries the signed webmail layout rules (`selectors.json`), mirrored the same way.
 2. **Community reports (opt-in).** Extensions may send SHA-256 fingerprints of domains their user reported (`sha256("tripwire-report-v1|" + domain)`). A fingerprint is published in `/v1/community.json` once **3 different networks** reported it **and** its first report is at least a day old. The extension shows those domains as **yellow** (suspicious), never red.
 
 | Endpoint | |
 |---|---|
 | `GET /v1/health` | `{ "ok": true }` |
 | `GET /v1/intel/threat-intel.bin`, `…/threat-intel.meta.json`, `…/threat-intel.meta.json.sig` | The signed compact list (ETag, cached 30 min) |
+| `GET /v1/intel/selectors.json`, `…/selectors.json.sig` | Signed webmail layout rules (see the main README, "Fixing a layout change without a new release") |
 | `GET /v1/community.json` | `{ v, generated, threshold, prefix, hashes: [...] }` (cached 10 min) |
 | `POST /v1/reports` | `{ "v": 1, "hashes": ["<64 hex>", …] }`, up to 20 per request and 50 per network per day |
 

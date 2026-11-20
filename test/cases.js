@@ -87,6 +87,26 @@
       ai: { risk: 'high', asks: ['credentials', 'click_link'], reasons: ['Threatens to block the account and asks for a password.'] } }, 'suspicious'],
   ];
 
+  // ---------- payment changes & reply-chain hijack ----------
+  const VALID_IBAN = 'GB82 WEST 1234 5698 7654 32';
+  EMAILS.push(['Supplier says bank details changed', { senderName: 'Accounts', senderEmail: 'accounts@northwind-supplies.example', subject: 'Updated remittance details',
+    body: `Hello, please note our bank details have changed. Kindly remit the outstanding invoice to the new account below. IBAN: ${VALID_IBAN}. Thank you.`, links: [] }, 'suspicious']);
+  EMAILS.push(['Hijacked thread: look-alike reply changes the account', { senderName: 'Dana Reyes', senderEmail: 'dana@northwlnd-supplies.example', subject: 'Re: Invoice 4471',
+    body: `Hi, quick update before you pay: we have changed banks. Please send the payment to the new account: ${VALID_IBAN}.`, links: [],
+    thread: { senders: ['dana@northwind-supplies.example', 'me@mycompany.example'] } }, 'suspicious']);
+  EMAILS.push(['Known supplier, same bank details as always', { senderName: 'Accounts', senderEmail: 'accounts@northwind-supplies.example', subject: 'Invoice 4502',
+    body: `Please find invoice 4502 attached. Payment to our usual account ${VALID_IBAN} within 30 days.`, links: [],
+    history: { seenBefore: true, mature: true, knownDomain: true } }, 'safe']);
+  EMAILS.push(['Known supplier, but different bank details than before', { senderName: 'Accounts', senderEmail: 'accounts@northwind-supplies.example', subject: 'Invoice 4503',
+    body: `Please find invoice 4503 attached. Payment to ${VALID_IBAN} within 30 days.`, links: [],
+    history: { seenBefore: true, mature: true, knownDomain: true, bankChanged: true, bankChangedDomain: 'northwind-supplies.example' } }, 'suspicious']);
+  EMAILS.push(['Imitates a supplier you correspond with (hashed history match)', { senderName: 'Northwind Accounts', senderEmail: 'billing@northwind-supplies.co', subject: 'Invoice overdue',
+    body: 'Your invoice is overdue. Please arrange payment today.', links: [],
+    history: { seenBefore: false, mature: true, lookalikeOf: 'northwind-supplies.example' } }, 'suspicious']);
+  EMAILS.push(['New company joins a thread, harmless note', { senderName: 'Sam Lee', senderEmail: 'sam@partner-agency.example', subject: 'Re: Launch plan',
+    body: 'Thanks for looping me in, happy to help with the launch next week.', links: [],
+    thread: { senders: ['priya@mycompany.example'] } }, 'safe']);
+
   // Community reports are yellow, never red.
   EMAILS.push(['Link to a community-reported domain', { senderName: 'Shop', senderEmail: 'deals@shop.example', subject: 'Sale', body: 'Our autumn sale is on now.',
     links: [{ href: 'https://reported-by-users.example/sale', text: 'Shop now' }] }, 'suspicious',
