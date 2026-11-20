@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.4.1 (2026-11-20)
+- **Fix: sender authentication on live Gmail.** Gmail keeps the message ID one level above where Tripwire looked, so "Show original" was never fetched, and real brand mail showed "not verified" instead of "✓ verified". Found by checking Tripwire on a real Gmail account. The headers are now also read as plain text, which works with Gmail's Trusted Types security policy.
+- **Browser tests** (`npm run test:e2e`, the `browser` job in CI): the extension is loaded into Chrome for Testing and checked on fake Gmail, Outlook and Yahoo pages, including a simulated Gmail redesign recovered by updated layout rules.
+- **Store preparation:** screenshots and a promo tile generated from the real extension (`npm run store:assets`, in `store/`). Store packages no longer include the local demo-file permission. The Firefox add-on ID is `tripwire@sparkv2.com`.
+
 ## 1.4.0 (2026-11-19)
 - **Reply-chain hijack detection.**
   - In Gmail conversations, a reply from a different company than the earlier messages is flagged, strongly when it's a look-alike address.

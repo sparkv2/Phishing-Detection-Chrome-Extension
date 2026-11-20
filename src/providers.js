@@ -157,10 +157,11 @@
       const url = `${location.origin}${base}?${ik ? 'ik=' + ik + '&' : ''}view=om&permmsgid=${encodeURIComponent(m.messageId)}`;
       const res = await fetch(url, { credentials: 'include' });
       if (!res.ok) return null;
+      // The raw message is the text of <pre id="raw_message_text">. It's extracted as text (not parsed as HTML):
+      // Gmail enforces Trusted Types, which blocks DOMParser on HTML strings in the page's own scripts.
       const html = await res.text();
-      const doc = new DOMParser().parseFromString(html, 'text/html');
-      const pre = doc.querySelector('#raw_message_text, pre');
-      return pre ? pre.textContent : null;
+      const pre = html.match(/<pre[^>]*\bid=["']?raw_message_text["']?[^>]*>([\s\S]*?)<\/pre>/i) || html.match(/<pre[^>]*>([\s\S]*?)<\/pre>/i);
+      return pre ? decodeEntities(pre[1]) : null;
     },
     // HTML attachments can be read (same site) to see whether they hide a login form or a redirect.
     fetchAttachment: async (a) => {
@@ -189,9 +190,18 @@
     }
     return senders.size ? { senders: [...senders].slice(0, 20) } : null;
   }
+  // Turns HTML character references (&lt; &#64; &#x40; ...) back into characters, without parsing HTML.
+  function decodeEntities(s) {
+    return s.replace(/<[^>]+>/g, '')
+      .replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(+n)).replace(/&#x([0-9a-f]+);/gi, (_, n) => String.fromCodePoint(parseInt(n, 16)))
+      .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;|&apos;/g, "'").replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&');
+  }
+  // Gmail's id for the opened message ("msg-f:<number>"), needed to fetch its "Show original" headers. The id sits on
+  // the message's outer box (div.adn), which can be an ancestor of the box `msg` points to (div.gs), so look on the
+  // box itself and its ancestors first, then inside it.
   function gmailMessageId(msg) {
     if (!msg) return '';
-    const el = matchesR(msg, 'gmail', 'messageId') ? msg : $r('gmail', 'messageId', msg);
+    const el = closestR(msg, 'gmail', 'messageId') || $r('gmail', 'messageId', msg);
     if (!el) return '';
     const id = el.getAttribute('data-message-id') || '';
     if (/msg-f:\d+/.test(id)) return id.match(/msg-f:\d+/)[0];

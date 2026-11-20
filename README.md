@@ -108,11 +108,25 @@ Updated rules are data only: CSS selectors, each validated before use. A rules f
 
 ## Development
 ```
-npm test              # 116 checks: analyzer, auth parsing, threat index, practice lessons, manifest
+npm test              # unit tests: analyzer, auth parsing, threat index, signatures, server, lessons, manifest
+npm run test:e2e      # browser tests (needs CHROME_PATH, see below)
 npm run build:intel   # re-download the feeds into data/
 npm run package       # dist/ folders and zips for chrome, edge, firefox
+npm run store:assets  # store screenshots and promo tile into store/ (needs CHROME_PATH)
 ```
 The same analyzer cases also run in the browser: open `test/analyzer-tests.html`.
+
+### Browser tests
+`test/e2e/run.mjs` loads the extension into a real Chrome and opens fake Gmail, Outlook and Yahoo pages at their real addresses. The browser has no network: mail-site requests are answered from `test/e2e/fixtures.mjs`. It checks:
+- inbox colours, and the banner on the email being read (not on compose boxes)
+- Gmail's "Show original" authentication check, the HTML-attachment check and "Show me"
+- the link warning
+- that a simulated redesign sets the **!** badge, and new layout rules fix it
+- that the popup and practice mode work, and no page throws an error
+
+It needs no npm packages, only Node 22+ and **Chrome for Testing**: regular Chrome no longer loads extensions from the command line. Download it from https://googlechromelabs.github.io/chrome-for-testing/ and set `CHROME_PATH` to its `chrome` executable. CI does this automatically (the `browser` job).
+
+The fake pages copy the structure of the real sites. When a site changes, update `data/selectors.json` (see below) and the matching fixture.
 
 ## Tripwire server
 `server/` holds the small service at `tripwire.sparkv2.com`. It mirrors the threat list and collects opt-in community reports (SHA-256 fingerprints of domains only), published once 3 different networks report a domain. See [server/README.md](server/README.md) for the setup, the hardening and the Cloudflare Tunnel.

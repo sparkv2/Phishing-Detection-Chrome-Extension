@@ -52,9 +52,32 @@ https://github.com/sparkv2/Phishing-Detection-Chrome-Extension/blob/main/PRIVACY
 - Network requests: threat-list and community-list downloads (from the Tripwire server, with the public feeds as a fallback), opt-in report fingerprints, shortener redirect lookups for links the user clicks, and re-fetching images already shown in an email.
 - No ads, no analytics, no remote code.
 
-## Screenshots to prepare (1280×800)
-1. Inbox with red and yellow rows (demo/demo-inbox.html)
-2. Opened phishing email with the banner and reasons
-3. Link warning dialog showing the real destination of a shortened link
-4. Popup with stats and Extra protection
-5. Practice mode lesson
+- "Remote code": none. The extension downloads only data: the threat list and the webmail layout rules (CSS selectors), both signed and verified before use. All code ships in the package.
+
+## Store images (in `store/`, regenerate with `npm run store:assets`)
+All made from the demo inbox (made-up emails) with the real extension running, so they show exactly what Tripwire draws.
+
+| File | Size | Shows |
+|---|---|---|
+| `screenshot-1.png` | 1280×800 | Inbox colours and the invoice-fraud warning ("bank details changed") |
+| `screenshot-2.png` | 1280×800 | A confirmed phishing email: score 0 and the reasons |
+| `screenshot-3.png` | 1280×800 | The warning before a dangerous link opens, with its real destination |
+| `screenshot-4.png` | 1280×800 | Practice mode: a lesson with its explanation |
+| `screenshot-5.png` | 1280×800 | The popup |
+| `promo-small.png` | 440×280 | Small promo tile |
+| `icons/icon128.png` | 128×128 | Store icon |
+
+## Packages (`npm run package`)
+| Store | Upload | Notes |
+|---|---|---|
+| Chrome Web Store | `dist/tripwire-<version>-chrome.zip` | |
+| Microsoft Edge Add-ons | `dist/tripwire-<version>-edge.zip` | Same code as Chrome |
+| Firefox (addons.mozilla.org) | `dist/tripwire-<version>-firefox.zip` | Add-on ID `tripwire@sparkv2.com` (set `TRIPWIRE_GECKO_ID` to change it before the *first* upload; it can never change afterwards). The on-device AI option shows "not supported" in Firefox. Mozilla may ask for the source: point them to the GitHub repo (no build step: the zip is the source). |
+
+Store packages leave out the `file:///…demo-inbox.html` match used for local testing.
+
+## What only you can do (accounts and fees)
+1. **Chrome Web Store:** register a developer account at https://chrome.google.com/webstore/devconsole (one-time US$5 fee, Google account, 2-step verification required). Then *New item* → upload the Chrome zip → fill in this listing, the privacy fields and the images → *Submit for review*. Review usually takes a few days; extensions with broad host permissions can take longer.
+2. **Microsoft Edge Add-ons:** register at https://partner.microsoft.com/dashboard/microsoftedge (free) → *Create new extension* → upload the Edge zip → reuse this listing.
+3. **Firefox:** create an account at https://addons.mozilla.org/developers (free) → *Submit a New Add-on* → *On this site* → upload the Firefox zip.
+4. Publisher contact email and website: use a contact address you're happy to make public (the stores show it), and `https://github.com/sparkv2/Phishing-Detection-Chrome-Extension` as the website.
