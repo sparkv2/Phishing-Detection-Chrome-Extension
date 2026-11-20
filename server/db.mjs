@@ -1,4 +1,10 @@
-// Shared storage and rules for community reports. Used by the server and by the admin tool.
+// =====================================================================================================================
+// Community-report storage and rules (server/db.mjs)
+//
+// Shared by the server (tripwire-server.mjs) and the admin tool (tripwire-admin.mjs). Holds the settings, the SQLite
+// database, how reporters are told apart (an HMAC of their network, never their address), and the rule for which
+// reported domains get published (publishable()).
+// =====================================================================================================================
 import { createHmac, randomBytes, createHash } from 'node:crypto';
 import { readFileSync, existsSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
@@ -19,13 +25,19 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
 for (const f of ['src/data.js', 'src/analyzer.js', 'src/intel.js']) require(join(root, f));
 const D = globalThis.PG_DATA, I = globalThis.PG_Intel;
-export const Intel = I;
+// The same fingerprint the extension sends: SHA-256 of "tripwire-report-v1|" + domain.
 export const fingerprint = (domain) => createHash('sha256').update(HASH_PREFIX + domain.toLowerCase().trim()).digest('hex');
 export const PROTECTED = new Set([...D.BRANDS.flatMap((b) => b.domains), ...D.FREE_MAIL, ...D.TRACKING_DOMAINS, ...D.SHORTENERS,
   ...I.PROTECTED, ...I.SUBDOMAIN_PLATFORMS].map(fingerprint));
 
 export const today = () => Math.floor(Date.now() / 86400000);
 
+// Opens (creating if needed) the SQLite database and the HMAC key. Returns { db, q: prepared queries, netKey, networkOf }.
+// Tables:
+//   reports     one row per (domain fingerprint, reporting network); `day` = last report from that network
+//   first_seen  the day a fingerprint was first reported (for the 1-day delay before publishing)
+//   usage       reports per network per day (for the daily limit; pruned after 2 days)
+//   suppressed  fingerprints an admin removed (see tripwire-admin.mjs); new reports for them are refused
 export function openDb() {
   mkdirSync(STATE, { recursive: true });
   const secretFile = join(STATE, 'hmac.key');

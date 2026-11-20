@@ -22,7 +22,8 @@
     ['Link text mismatch only', { senderName: 'Billing', senderEmail: 'billing@smallshop.example', subject: 'Invoice', body: 'Please see your invoice.',
       links: [{ href: 'https://evil-login.example/x', text: 'https://www.chase.com/invoice' }] }, 'suspicious'],
     ['User-reported domain', { senderName: 'Bob', senderEmail: 'bob@scammy.example', subject: 'hi', body: 'hello there friend how are you', links: [] }, 'phishing', { blocked: new Set(['scammy.example']) }],
-    ['Feed-listed link', { senderName: 'News', senderEmail: 'news@site.example', subject: 'Read', body: 'An article you might like to read today.', links: [{ href: 'https://bad.phish.example/a', text: 'Read more' }] }, 'phishing', { feed: new Set(['bad.phish.example']) }],
+    ['Threat-listed link', { senderName: 'News', senderEmail: 'news@site.example', subject: 'Read', body: 'An article you might like to read today.', links: [{ href: 'https://bad.phish.example/a', text: 'Read more' }] }, 'phishing',
+      T([['bad.phish.example', { cat: 'phishing', source: 'test list', matched: 'bad.phish.example' }]])],
     ['Display name contains other email', { senderName: 'support@paypal.com', senderEmail: 'x83@mailer.ru', subject: 'Receipt', body: 'Your payment details need to be updated. Update your payment now.', links: [] }, 'suspicious'],
 
     // ---------- legitimate (false-positive traps) ----------

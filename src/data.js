@@ -1,4 +1,10 @@
-// Reference data used by the analyzer. Everything here is local — nothing is fetched at scan time.
+// =====================================================================================================================
+// Reference data (data.js)
+//
+// The word lists and domain lists the analyzer (analyzer.js) checks emails against. Everything here ships with the
+// extension; nothing is fetched while scanning. To teach Tripwire about a new brand, scam phrase or free-mail
+// provider, this is the file to edit (then run `npm test`).
+// =====================================================================================================================
 (function (root) {
   'use strict';
 
@@ -52,7 +58,7 @@
   const PHISH_DOMAIN_WORDS = ['secure', 'security', 'login', 'signin', 'verify', 'verification', 'account', 'accounts',
     'support', 'help', 'service', 'services', 'update', 'billing', 'alert', 'confirm', 'auth', 'online', 'customer',
     'recovery', 'unlock', 'wallet', 'pay', 'payment', 'id', 'web', 'app', 'center', 'team', 'access', 'portal', 'official',
-    'alerts', 'notice', 'check', 'mail', 'info', 'refund', 'reset', 'password', 'locked', 'safe', 'auth', 'sso', 'bill',
+    'alerts', 'notice', 'check', 'mail', 'info', 'refund', 'reset', 'password', 'locked', 'safe', 'sso', 'bill',
     'delivery', 'redelivery', 'tracking', 'track', 'parcel', 'shipping', 'package', 'fee', 'tax', 'gov', 'bank'];
 
   const FREE_MAIL = ['gmail.com', 'googlemail.com', 'yahoo.com', 'ymail.com', 'outlook.com', 'hotmail.com', 'live.com',
@@ -142,8 +148,8 @@
 
   const RISKY_ATTACHMENT = /\b[\w\- ]{1,60}\.(exe|scr|js|jse|vbs|vbe|bat|cmd|com|pif|msi|iso|img|hta|wsf|lnk|jar|ps1|docm|xlsm|pptm|html?|shtml)\b/i;
 
-  // Tiny built-in list for demos & tests. The real list is downloaded from OpenPhish by the background worker
-  // and compared locally. Users' own reports are added to a separate local list.
+  // A tiny built-in list used by the demo inbox and the tests. The real list (~190k entries) is data/threat-intel.bin,
+  // kept up to date by the background worker; the user's own reports are a separate list in storage.
   const BUILTIN_BLOCKLIST = ['paypa1-security.com', 'appleid-verify-account.com', 'micros0ft-login.net',
     'secure-chase-alerts.com', 'amaz0n-billing.com', 'netflix-payment-update.top'];
 

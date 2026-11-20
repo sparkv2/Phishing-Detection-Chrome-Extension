@@ -1,16 +1,38 @@
-// Phishing analysis engine. Pure functions, no network, no storage. Runs entirely on the user's device.
+// =====================================================================================================================
+// Tripwire detection engine (analyzer.js)
+//
+// Turns one email into a verdict: a 0-100 safety score, a level (safe / suspicious / phishing) and a list of
+// plain-language reasons ("signals"). It is made of pure functions: no network, no storage, no page access. Everything
+// it needs (the email's text, links, headers, history...) is passed in by the content script, which is what makes it
+// easy to test in Node (see test/).
+//
+// How an email flows through it (see analyzeEmail at the bottom):
+//   1. Sender      analyzeSender      who claims to be sending it, and does the address back that up?
+//   2. Wording     analyzeContent     pressure, threats, requests for passwords or money...
+//   3. Payments    paymentChange...   "our bank details changed" and account numbers
+//   4. History     historySignals     first-time sender, look-alike of someone you know, changed bank details
+//   5. Thread      threadSignals      a reply from a different / look-alike company mid-conversation
+//   6. Links       analyzeLink        where each link and QR code really goes
+//   7. Attachments analyzeAttachments disguised programs, web-page attachments, login forms
+//   8. Scoring     each group adds a capped penalty; red is reserved for *confirmed* threats only
+//
+// Every signal looks like: { id, category, weight, title, explain, evidence, target }
+//   weight  how much it lowers the score;  target  where the banner's "Show me" button points on the page.
+// =====================================================================================================================
 (function (root) {
   'use strict';
-  const D = root.PG_DATA;
+  const D = root.PG_DATA; // reference lists from src/data.js (brands, phrases, free-mail providers...)
 
-  // ---------- helpers ----------
+  // ---------- small helpers ----------
   const lc = (s) => (s || '').toString().toLowerCase();
   const uniq = (arr) => [...new Set(arr)];
   const EMAIL_RE = /[a-z0-9._%+\-]+@[a-z0-9.\-\u00a1-\uffff]+\.[a-z\u00a1-\uffff]{2,}/i;
 
+  // Characters from other alphabets that look identical to Latin letters (Cyrillic "\u0430" vs Latin "a"...).
   const CONFUSABLES = { 'а': 'a', 'е': 'e', 'о': 'o', 'р': 'p', 'с': 'c', 'х': 'x', 'у': 'y', 'і': 'i', 'ӏ': 'l',
     'ԁ': 'd', 'ɡ': 'g', 'ո': 'n', 'ս': 'u', 'ѕ': 's', 'ј': 'j', 'һ': 'h', 'ԛ': 'q', 'ԝ': 'w', 'ı': 'i', 'ɩ': 'l' };
 
+  // Undo common disguises so "paypa1", "rnicrosoft" and a Cyrillic-"а" "аpple" all compare equal to the real name.
   function normalizeHomoglyphs(s) {
     let out = '';
     for (const ch of lc(s)) out += CONFUSABLES[ch] || ch;
@@ -18,6 +40,9 @@
       .replace(/rn/g, 'm').replace(/vv/g, 'w');
   }
 
+  // ---------- domain helpers ----------
+  // The "registrable domain" is the part someone actually buys: mail.paypal.com -> paypal.com, x.evil.co.uk -> evil.co.uk.
+  // Comparing these (not full hosts) is what tells "a PayPal server" apart from "a server that mentions PayPal".
   function registrableDomain(host) {
     host = lc(host).replace(/\.$/, '');
     if (!host || isIP(host)) return host;
@@ -33,11 +58,14 @@
     return D.MULTI_SUFFIXES.includes(last2) ? parts.slice(0, -2).join('.') : parts.slice(0, -1).join('.');
   }
   function tld(host) { const p = lc(host).split('.'); return p[p.length - 1]; }
-  function isIP(host) { return /^\d{1,3}(\.\d{1,3}){3}$/.test(host) || /^\[?[0-9a-f:]+\]?$/i.test(host) && host.includes(':'); }
+  // IPv4 (1.2.3.4) or IPv6 ([2001:db8::1]) literal instead of a name.
+  function isIP(host) { return /^\d{1,3}(\.\d{1,3}){3}$/.test(host) || (/^\[?[0-9a-f:]+\]?$/i.test(host) && host.includes(':')); }
+  // Is `host` one of `domains`, or a subdomain of one? (mail.paypal.com matches paypal.com; paypal.com.evil.ru doesn't.)
   function domainMatches(host, domains) {
     host = lc(host);
     return domains.some((d) => host === d || host.endsWith('.' + d));
   }
+  // Edit distance (with swaps counted as one edit). Returns 99 early when lengths differ too much to be a typo.
   function levenshtein(a, b) {
     if (Math.abs(a.length - b.length) > 2) return 99;
     const dp = Array.from({ length: a.length + 1 }, (_, i) => [i]);
@@ -48,12 +76,20 @@
     }
     return dp[a.length][b.length];
   }
+  // Regex for a whole word (so "ups" doesn't match inside "groups").
   function wordRe(word) { return new RegExp('(^|[^a-z0-9])' + word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '($|[^a-z0-9])', 'i'); }
 
+  // ---------- brand look-alikes ----------
   function brandLabels(brand) { return uniq(brand.domains.map((d) => domainLabel(d)).filter((l) => l.length >= 3)); }
   function brandOfDomain(host) { return D.BRANDS.find((b) => domainMatches(host, b.domains)) || null; }
 
-  // Does `host` look like an imitation of a known brand? Returns { brand, kind } or null.
+  // Brand names that are also everyday words ("apple", "chase", "office"): these only count as a fake brand domain
+  // when combined with phishing words, so apple-pie-recipes.com isn't flagged as fake Apple.
+  const GENERIC_LABELS = new Set(['office', 'outlook', 'live', 'square', 'squareup', 'cash', 'steam', 'zoom', 'chase',
+    'citi', 'meta', 'apple', 'prime', 'drive', 'wells', 'capital']);
+
+  // Does `host` look like an imitation of a known brand? Returns { brand, kind } or null. The checks run from most
+  // to least certain; `kind` picks the explanation shown to the user (LOOKALIKE_TEXT) and the weight.
   function lookalikeBrand(host) {
     host = lc(host);
     if (!host || isIP(host) || brandOfDomain(host)) return null;
@@ -84,8 +120,6 @@
     }
     return null;
   }
-  const GENERIC_LABELS = new Set(['office', 'outlook', 'live', 'square', 'squareup', 'cash', 'steam', 'zoom', 'chase',
-    'citi', 'meta', 'apple', 'prime', 'drive', 'wells', 'capital']);
   const LOOKALIKE_WEIGHT = { homoglyph: 45, combo: 40, typo: 40, subdomain: 40, 'wrong-tld': 35 };
   function lookalikeWeight(look, host) {
     if (look.kind === 'wrong-tld' && tld(host).length === 2) return 20; // e.g. amazon.es may be a real regional site
@@ -100,11 +134,14 @@
     subdomain: (b, h) => `"${h}" puts "${b.name}" at the start of the address, but the part that really matters (the end) belongs to someone else.`,
   };
 
+  // ---------- URLs ----------
+  // Relative links resolve against a dummy base; a result on "invalid.local" therefore means "not a real web link".
   function parseUrl(href) {
     try { return new URL(href, 'https://invalid.local/'); } catch (e) { return null; }
   }
 
-  // Unwrap well-known redirect wrappers so we judge the real destination.
+  // Unwrap well-known redirect wrappers (Google, Outlook Safe Links, Facebook, Reddit) so we judge the real
+  // destination, not the wrapper. Up to 3 layers, since wrappers can be nested.
   function unwrapUrl(href) {
     let u = parseUrl(href);
     for (let i = 0; u && i < 3; i++) {
@@ -122,19 +159,22 @@
     return u;
   }
 
-  // target: where the banner's "Show me" button points in the email ({ type: 'sender'|'link'|'text'|'attachment'|'image'|'form'|'subject', ... })
+  // Builds one signal (a reason shown in the banner). See the file header for the fields.
+  // target: where "Show me" points ({ type: 'sender'|'link'|'text'|'attachment'|'image'|'form'|'subject', ... }).
   function sig(id, category, weight, title, explain, evidence, target) {
     const s = { id, category, weight, title, explain, evidence: evidence || '' };
     if (target) s.target = target;
     return s;
   }
 
-  // ---------- URL analysis ----------
-  // Returns { host, regDomain, weight, signals, known }
+  // ---------- one URL ----------
+  // Judges a single URL on its own (no link text). Returns { href, host, regDomain, finalHref, weight, signals, known }.
+  // `known` means it is on a threat list, which makes the whole email red.
   function analyzeUrl(href, lists) {
     lists = lists || {};
     const raw = (href || '').trim();
     const out = { href: raw, host: '', regDomain: '', weight: 0, signals: [], known: false };
+    // Links that aren't web pages at all: running code, or a whole page packed into the link.
     if (/^\s*javascript:/i.test(raw)) {
       out.signals.push(sig('js-link', 'link', 40, 'Link runs hidden code', 'This link doesn\'t open a web page — it runs code. Real emails never need this.', raw.slice(0, 60)));
     } else if (/^\s*data:/i.test(raw)) {
@@ -143,11 +183,12 @@
     if (out.signals.length) { out.weight = 40; return out; }
 
     const u = unwrapUrl(raw);
-    if (!u || !/^https?:$/.test(u.protocol) || u.hostname === 'invalid.local') return out;
+    if (!u || !/^https?:$/.test(u.protocol) || u.hostname === 'invalid.local') return out; // mailto:, #anchor, etc.
     const host = lc(u.hostname);
     const reg = registrableDomain(host);
     out.host = host; out.regDomain = reg; out.finalHref = u.href;
 
+    // 1) Is it on a list? Community reports only warn (yellow); curated threat lists confirm (red).
     const threat = knownThreat(host, lists, u);
     if (threat && threat.cat === 'community') {
       // Reported by several Tripwire users, but not confirmed by a curated list: a strong warning, never "red".
@@ -158,6 +199,7 @@
       out.threat = threat;
       out.signals.push(threatSignal('known-bad-link', 'link', threat, threat.byUrl ? (threat.matched || host) : host));
     }
+    // 2) Tricks visible in the address itself, each with its own weight.
     if (isIP(host)) out.signals.push(sig('ip-link', 'link', 30, 'Link uses a number instead of a name',
       'The link goes to a raw number address (like 192.168.1.1) instead of a company website name. Legitimate companies almost never do this.', host));
     if (host.includes('xn--')) out.signals.push(sig('punycode-link', 'link', 25, 'Link uses disguised characters',
@@ -181,8 +223,9 @@
     return out;
   }
 
-  // Is this host (or exact URL) on a threat list? Returns { cat, source, label } or null.
-  // lists.threats: Map filled by the content script from the background index (host / 'url:'+key -> hit or null).
+  // Is this host (or exact URL) on a threat list? Returns { cat, source, label, matched } or null.
+  // Checked in order: the user's own reports, the small built-in list, then the answers the content script got from
+  // the background worker's big index (lists.threats: host or 'url:'+key -> hit, or null when it is clean).
   function knownThreat(host, lists, u) {
     host = lc(host);
     const reg = registrableDomain(host);
@@ -190,14 +233,15 @@
     if (D.BUILTIN_BLOCKLIST.includes(host) || D.BUILTIN_BLOCKLIST.includes(reg)) return { cat: 'phishing', source: 'Tripwire built-in list' };
     const t = lists.threats;
     if (t) {
+      // Exact-URL matches first: on shared hosts (Google Sites, GitHub...) only the listed page is bad, not the host.
       if (u && root.PG_Intel) for (const k of root.PG_Intel.urlKeys(u)) { const hit = t.get('url:' + k); if (hit) return Object.assign({ byUrl: true }, hit); }
       const hit = t.get(host);
       if (hit) return hit;
     }
-    if (lists.feed && (lists.feed.has(host) || lists.feed.has(reg))) return { cat: 'phishing', source: 'phishing list' };
     return null;
   }
 
+  // Wording for list matches, per threat category and per "where it was found" (a link or the sender).
   const THREAT_TEXT = {
     phishing: { link: 'Link goes to a known phishing site', sender: 'Sender is on a phishing blocklist',
       explain: (x, src) => `"${x}" is on a list of confirmed phishing websites${src}. These pages are built to steal passwords and card details. Do not open it.` },
@@ -228,7 +272,9 @@
     return host;
   }
 
-  // ---------- link-text mismatch ----------
+  // ---------- one link (URL + the text shown for it) ----------
+  // Adds the checks that need the visible text: "the link says chase.com but goes to evil.example", or a button
+  // saying "Log in to PayPal" that doesn't go to PayPal. ctx.senderBrand avoids flagging a brand's own links.
   function analyzeLink(link, lists, ctx) {
     // A shortened link the background worker already followed is judged by where it really ends up.
     const expandedTo = lists && lists.expanded && lists.expanded.get((link.href || '').trim());
@@ -243,6 +289,7 @@
     const text = (link.text || '').trim();
     if (!res.host) return res;
     const shown = domainInText(text);
+    // Newsletters route links through click-tracking services; that alone isn't a lie about the destination.
     const tracking = domainMatches(res.host, D.TRACKING_DOMAINS);
     if (shown && registrableDomain(shown) !== res.regDomain && !tracking) {
       const sameBrand = brandOfDomain(shown) && brandOfDomain(shown) === brandOfDomain(res.host);
@@ -300,7 +347,8 @@
     return 'unknown';
   }
 
-  // ---------- sender analysis ----------
+  // ---------- sender ----------
+  // Normalizes the From line into { name, email, domain }. Some pages only show "Name <address>" as text.
   function parseSender(name, email) {
     name = (name || '').trim();
     email = lc(email || '').trim();
@@ -309,6 +357,7 @@
     return { name, email, domain };
   }
 
+  // Which brand, if any, does the display name claim to be? ("PayPal Security" -> PayPal; "Chase Miller" -> none.)
   function claimedBrand(displayName) {
     const n = lc(displayName).replace(/[^a-z0-9\u00a1-\uffff\s.\-]/g, ' ');
     for (const b of D.BRANDS) {
@@ -324,18 +373,21 @@
     return null;
   }
 
+  // Checks the sender. Returns { signals, ctx } where ctx tells the rest of the analysis who the sender really is:
+  //   senderBrand    the brand whose real domain sent it (or null)
+  //   verifiedBrand  the address belongs to that brand (not yet proof: From lines can be forged)
+  //   authVerified   ...and the provider's DMARC/DKIM check proves it
+  //   free           sent from a personal free-mail account (gmail.com, outlook.com...)
+  //   auth           'pass' | 'fail' | 'unknown' anti-forgery verdict
   function analyzeSender(sender, lists, auth) {
     const signals = [];
     const { name, email, domain } = sender;
     const ctx = { senderBrand: null, verifiedBrand: false, free: false, auth: 'unknown' };
-    if (!domain) {
-      const b = claimedBrand(name);
-      ctx.claimed = b;
-      return { signals, ctx };
-    }
+    if (!domain) return { signals, ctx }; // the page didn't show an address: nothing to check
     const reg = registrableDomain(domain);
     ctx.free = D.FREE_MAIL.includes(reg) || D.FREE_MAIL.includes(domain);
 
+    // On a list? (A reported single address, e.g. a gmail.com scammer, is checked by full address.)
     const senderThreat = (lists.blocked && lists.blocked.has(email)) ? { cat: 'reported', source: 'your reports' } : knownThreat(domain, lists);
     if (senderThreat && senderThreat.cat === 'community') {
       signals.push(sig('community-sender', 'sender', 35, 'Other Tripwire users reported this sender\'s domain',
@@ -348,8 +400,8 @@
     const look = lookalikeBrand(domain);
     if (look) signals.push(sig('lookalike-sender', 'sender', lookalikeWeight(look, domain) + 5, `Fake ${look.brand.name} address`, LOOKALIKE_TEXT[look.kind](look.brand, domain), email));
 
+    // Does the display name claim a brand, and does the address belong to it?
     const claimed = claimedBrand(name);
-    ctx.claimed = claimed;
     if (claimed) {
       if (domainMatches(domain, claimed.domains) && !ctx.free) { ctx.senderBrand = claimed; ctx.verifiedBrand = true; }
       else if (ctx.free) signals.push(sig('brand-freemail', 'sender', 40, `Claims to be ${claimed.name}, but uses a free email account`,
@@ -375,6 +427,7 @@
       }
     }
     ctx.authVerified = ctx.verifiedBrand && ctx.auth === 'pass';
+    // Smaller tricks: an address written in the display name, departments on personal accounts, cheap endings.
     const nameEmail = name.match(EMAIL_RE);
     if (nameEmail && lc(nameEmail[0]) !== email) {
       signals.push(sig('name-email-mismatch', 'sender', 35, 'Sender name shows a different address',
@@ -389,7 +442,9 @@
     return { signals, ctx };
   }
 
-  // ---------- content analysis ----------
+  // ---------- wording ----------
+  // Each phrase category (phrases live in data.js) scores `w` for the first match, `step` more per extra distinct
+  // match, up to `cap`. So one "urgent" costs a little; a wall of threats costs more, but never unboundedly.
   const CATEGORY_INFO = {
     urgency: { w: 8, step: 3, cap: 14, title: 'Pressures you to act fast',
       explain: 'Scammers rush you so you don\'t stop to think or check. Real companies rarely demand action within hours.' },
@@ -406,9 +461,11 @@
     secrecy: { w: 10, step: 3, cap: 14, title: 'Asks for secrecy or a quick favour',
       explain: 'Requests to keep something quiet, or "quick favours" from a boss or friend, are common in gift-card and wire-fraud scams.' },
   };
+  // Phrases compiled once at load time, not per email.
   const COMPILED = {};
   for (const cat of Object.keys(D.PHRASES)) COMPILED[cat] = D.PHRASES[cat].map((p) => new RegExp('\\b' + p, 'i'));
 
+  // Returns { category: [matched phrases, lowercased] } for every category that matched.
   function findPhrases(text) {
     const found = {};
     for (const cat of Object.keys(COMPILED)) {
@@ -434,18 +491,24 @@
 
   // ---------- attachments ----------
   // attachments: [{ name, mime, html: { password, form, redirect, obfuscated } }] read from the webmail page.
+  // `html` is only present for HTML attachments whose contents the content script could read (Gmail).
   const EXEC_EXT = /\.(exe|scr|js|jse|vbs|vbe|bat|cmd|com|pif|msi|msix|appx|hta|wsf|wsh|lnk|jar|ps1|psm1|cpl|reg|dll|chm|application|url)$/i;
   const HTML_EXT = /\.(html?|shtml|xhtml|svg|mht|mhtml)$/i;
   const DISK_EXT = /\.(iso|img|vhdx?)$/i;
   const MACRO_EXT = /\.(docm|dotm|xlsm|xltm|xlam|pptm|potm|ppam|sldm)$/i;
   const ARCHIVE_EXT = /\.(zip|rar|7z|gz|tgz|cab|ace|arj)$/i;
   const DOC_EXT = /\.(pdf|docx?|xlsx?|pptx?|txt|rtf|csv|odt|jpe?g|png|gif|mp3|mp4|wav)$/i;
+  // Invisible text-direction characters. U+202E ("right-to-left override") flips the rest of a file name on screen,
+  // so "invoice‮fdp.exe" displays as "invoiceexe.pdf". It is replaced with a visible «RTL» marker; the others
+  // (LRM, RLM, LRE..PDF, LRI..PDI) are simply removed before checking the extension.
+  const BIDI_CHARS = /[‎‏‪-‮⁦-⁩]/g;
 
+  // One signal per suspicious file; the strongest reason for each file wins (if / else-if chain).
   function analyzeAttachments(attachments, body) {
     const signals = [];
     const seen = new Set();
     for (const a of attachments || []) {
-      const name = (a.name || '').trim().replace(/[‎‏‪-‮⁦-⁩]/g, (c) => (c === '‮' ? '«RTL»' : ''));
+      const name = (a.name || '').trim().replace(BIDI_CHARS, (c) => (c === '‮' ? '«RTL»' : ''));
       if (!name || seen.has(lc(name))) continue;
       seen.add(lc(name));
       const add = (id, weight, title, explain) => signals.push(sig(id, 'attachment', weight, title, explain, name));
@@ -466,6 +529,7 @@
       } else if (ARCHIVE_EXT.test(name) && /pass(word|code)|\bpwd\b|kennwort|contraseña|mot de passe/i.test(body || '')) {
         add('attachment-locked-archive', 15, 'Password-protected archive', `"${name}" is a compressed file and the email gives you a password for it. Locking a file this way stops security scanners from looking inside.`);
       }
+      // What the content script found inside an HTML attachment (independent of the name checks above).
       const h = a.html;
       if (h && (h.password || h.form)) {
         add('attachment-login-form', 45, 'Attachment contains a login form', `"${name}" has boxes for a password or other details. Typing into a file you got by email sends your details to whoever made it.`);
@@ -488,6 +552,8 @@
 
   // ---------- bank details & payment changes ----------
   // Account numbers in the text, validated by their checksums so ordinary numbers aren't mistaken for them.
+  // IBAN: move the first 4 characters to the end, turn letters into numbers (A=10...Z=35), and the whole number
+  // mod 97 must be 1. Done digit by digit so it never needs big-number arithmetic.
   function ibanValid(iban) {
     const s = iban.slice(4) + iban.slice(0, 4);
     let rem = 0;
@@ -497,6 +563,7 @@
     }
     return rem === 1;
   }
+  // US routing (ABA) number: weighted digit sum (3, 7, 1 repeating) must be a multiple of 10.
   function abaValid(n) {
     const d = n.split('').map(Number);
     return (3 * (d[0] + d[3] + d[6]) + 7 * (d[1] + d[4] + d[7]) + (d[2] + d[5] + d[8])) % 10 === 0 && !/^0{9}$/.test(n);
@@ -519,6 +586,9 @@
     return out.slice(0, 10);
   }
   const PAYCHANGE_RE = D.PAYMENT_CHANGE.map((p) => new RegExp('\\b' + p, 'i'));
+  // Returns { signals, phrases, banks }. Three cases, strongest first:
+  //   1. a known sender's bank details changed (from history)  2. "payment details changed" wording
+  //   3. bank details from a first-time sender (only once history has had time to learn who you know)
   function paymentChangeSignals(text, banks, history) {
     const t = (text || '').replace(/\s+/g, ' ');
     const phrases = uniq(PAYCHANGE_RE.map((re) => (t.match(re) || [])[0]).filter(Boolean).map((x) => x.trim()));
@@ -547,6 +617,8 @@
   // them against the hashed history of who you correspond with, so no address book is ever stored in plain text.
   const VARIANT_CHARS = 'abcdefghijklmnopqrstuvwxyz0123456789-';
   const COMMON_TLDS = ['com', 'net', 'org', 'co', 'io', 'us', 'biz', 'info', 'co.uk', 'com.au', 'ca', 'de', 'fr', 'nl', 'eu'];
+  // Every string one edit away from `label` (delete, swap neighbours, replace, insert), plus undone look-alikes.
+  // About 75 x length candidates: a few hundred to ~1,500 for typical names.
   function editVariants(label) {
     const out = new Set();
     for (let i = 0; i < label.length; i++) out.add(label.slice(0, i) + label.slice(i + 1));
@@ -560,6 +632,7 @@
     out.delete(label); out.delete('');
     return out;
   }
+  // Possible "originals" this sender could be imitating: { domains: [...], addresses: [...] }.
   function lookalikeCandidates(email) {
     email = lc(email);
     const [local, domain] = email.split('@');
@@ -589,9 +662,11 @@
     if (normalizeHomoglyphs(la) === normalizeHomoglyphs(lb)) return true;
     return lb.length >= 4 && levenshtein(la, lb) === 1;
   }
+  // "Re:" in several languages (German AW, Nordic SV, Dutch Antw, Italian R/RIF, Turkish YNT, Polish ODP, Finnish VS).
   const REPLY_RE = /^\s*(re|aw|sv|antw|r|rif|ynt|odp|vs)\s*(\[\d+\])?\s*:/i;
 
-  // thread: { senders: [emails of the other messages in this conversation] }, from the webmail page.
+  // thread: { senders: [emails of the other messages in this conversation] }, from the webmail page (Gmail only).
+  // `risky`: the email asks for money or details, which turns "a new company joined" from a note into a warning.
   function threadSignals(thread, sender, risky) {
     const out = [];
     if (!thread || !sender.email || !(thread.senders || []).length) return out;
@@ -650,6 +725,7 @@
 
   // ---------- on-device AI hints ----------
   // ai: { risk: 'low'|'medium'|'high', asks: [...], reasons: [...], summary } from Chrome's built-in model (optional).
+  // The AI counts for more when the keyword checks found nothing (e.g. a scam in another language).
   const AI_ASK_TEXT = { credentials: 'Give personal information, a password or a code', payment: 'Make a payment or share payment details',
     gift_cards: 'Buy gift cards', click_link: 'Click a link or button', open_attachment: 'Open an attachment', call_phone: 'Call a phone number',
     reply: 'Reply to the email', personal_info: 'Give personal information, a password or a code' };
@@ -678,7 +754,8 @@
     return uniq(asks);
   }
 
-  // Simple on-device summary: pick the most informative sentences.
+  // Simple on-device summary: drop greetings, sign-offs and footer boilerplate, score the remaining sentences
+  // (action words and position near the top score higher), and keep the best two in their original order.
   function summarize(subject, body) {
     const clean = (body || '').replace(/\s+/g, ' ').trim();
     if (!clean) return subject ? `This email is about: "${subject}".` : 'This email has no readable text.';
@@ -696,34 +773,45 @@
     return out;
   }
 
-  // ---------- main ----------
-  // input: { senderName, senderEmail, subject, body, links: [{href,text}], hasForm, context: 'list'|'open',
-  //          auth: parsed Authentication-Results, attachments: [{name, html}], qrCodes: [{data}], history: {...}, ai: {...} }
-  // lists: { blocked:Set, trusted:Set, threats:Map, expanded:Map(shortHref -> finalHref), feed:Set }
+  // =================================================================================================================
+  // analyzeEmail: the main entry point. Runs every check above and combines them into one verdict.
+  //
+  // input: { senderName, senderEmail, subject, body, links: [{href, text}], hasForm, context: 'list'|'open',
+  //          auth, attachments, qrCodes: [{data, src}], history, thread, ai }   (all but the first few are optional)
+  //          context 'list' = an inbox row (only the snippet is known), 'open' = a fully opened email.
+  // lists:   { blocked: Set, trusted: Set, threats: Map, expanded: Map(shortHref -> finalHref) }
+  // returns: { score, level, high, known, signals, sender, verifiedBrand, auth, links, asks, tips, summary, ... }
+  // =================================================================================================================
   function analyzeEmail(input, lists) {
     lists = lists || {};
     const sender = parseSender(input.senderName, input.senderEmail);
     const trusted = !!(lists.trusted && sender.email && (lists.trusted.has(sender.email) || lists.trusted.has(sender.domain)));
 
+    // ----- 1. sender -----
     const s = analyzeSender(sender, lists, input.auth);
     // Trusting a sender silences warnings about them, except known threats and failed anti-forgery checks:
     // a forged From address can copy anyone, including people you trust.
-    let senderSignals = trusted ? s.signals.filter((x) => x.category === 'known' || x.id.startsWith('auth-fail')) : s.signals;
+    const senderSignals = trusted ? s.signals.filter((x) => x.category === 'known' || x.id.startsWith('auth-fail')) : s.signals;
 
+    // ----- 2. wording -----
     const content = analyzeContent(input.subject, input.body);
-    let contentSignals = content.signals;
+    const contentSignals = content.signals;
+    // ----- 3. payments -----
     // Payment changes: wording, bank numbers, and whether this sender's bank details changed since last time.
     const banks = findBankDetails((input.subject || '') + '\n' + (input.body || ''));
     const pay = paymentChangeSignals((input.subject || '') + ' ' + (input.body || ''), banks, input.history);
     // A changed account from a trusted sender still counts: their mailbox may have been broken into.
     const paySignals = trusted ? pay.signals.filter((x) => x.id === 'bank-details-changed') : pay.signals;
     const moneyAsk = !!(pay.phrases.length || content.found.financial || content.found.credentials || banks.length);
+    // ----- 4. history and 5. thread (both count as sender signals) -----
     senderSignals.push(...historySignals(input.history, sender, content.found, trusted, input.subject, moneyAsk));
     if (!trusted) senderSignals.push(...threadSignals(input.thread, sender, moneyAsk));
+    // ----- 7. attachments (the real list if the page shows one, otherwise file names mentioned in the text) -----
     const attachmentSignals = input.attachments && input.attachments.length ? analyzeAttachments(input.attachments, input.body)
       : [mentionedAttachment(input.body)].filter(Boolean);
     const aiSigs = trusted ? [] : aiSignals(input.ai, content.found);
 
+    // ----- 6. links -----
     // QR codes found in images are treated like links: scammers use them to get past link scanners.
     const qrLinks = [];
     for (const q of (input.qrCodes || [])) {
@@ -752,6 +840,8 @@
       if (r.host || r.signals.length) linkResults.push(Object.assign(r, { text: (l.text || '').trim() }));
       if (linkResults.length > 200) break;
     }
+    // Keep one copy of each kind of warning per destination domain, most serious links first, so ten links to the
+    // same bad site produce one reason, not ten.
     const riskyLinks = linkResults.filter((r) => r.weight > 0).sort((a, b) => b.weight - a.weight);
     const linkSignals = [];
     const seenLinkSig = new Set();
@@ -788,7 +878,10 @@
       { type: 'text', phrases: [...(content.found.urgency || []), ...(content.found.fear || []), ...(content.found.secrecy || []),
         ...(content.found.credentials || []), ...(content.found.financial || []), ...pay.phrases] }));
 
-    // ----- scoring -----
+    // ----- 8. scoring -----
+    // Each group's weights become one capped penalty, subtracted from 100. Caps keep any single kind of evidence
+    // (especially wording, which marketing email also uses) from dominating. Within links and attachments the worst
+    // item counts fully and the rest at a quarter.
     let contentPenalty = contentSignals.reduce((a, x) => a + x.weight, 0);
     contentPenalty = Math.min(contentPenalty, 45); // wording alone can never make an email "red"
     const cleanLinks = !riskyLinks.some((r) => r.weight >= 20);
@@ -826,6 +919,8 @@
     else if (score < 70) level = 'suspicious';
     const high = !known && score < 35;
 
+    // ----- the result -----
+    // All reasons, most serious first (that is the order the banner shows them in).
     const signals = [...senderSignals, ...linkSignals, ...attachmentSignals, ...paySignals, ...contentSignals, ...aiSigs].sort((a, b) => b.weight - a.weight);
     // Every reason gets a "Show me" target unless it already has one.
     for (const x of signals) {
@@ -860,6 +955,7 @@
     };
   }
 
+  // Exported for the content script, background worker, page guard, server and tests.
   root.PG_Analyzer = { analyzeEmail, analyzeUrl, analyzeLink, analyzeAttachments, registrableDomain, lookalikeBrand, unwrapUrl, summarize,
-    parseSender, parseAuthResults, authVerdict, isIP, brandOfDomain, findBankDetails, lookalikeCandidates, looksLike };
+    parseSender, parseAuthResults, authVerdict, findBankDetails, lookalikeCandidates, looksLike };
 })(typeof globalThis !== 'undefined' ? globalThis : this);

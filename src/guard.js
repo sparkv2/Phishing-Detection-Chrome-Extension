@@ -12,6 +12,7 @@
   const A = window.PG_Analyzer, I = window.PG_Intel;
   const host = location.hostname.toLowerCase();
 
+  // Where the password alert learns your email password (hosts), and the sites where typing it is expected (domains).
   const LOGIN_PROVIDERS = [
     { id: 'google', name: 'Google', hosts: ['accounts.google.com'], domains: ['google.com', 'gmail.com', 'youtube.com'] },
     { id: 'microsoft', name: 'Microsoft', hosts: ['login.live.com', 'login.microsoftonline.com'], domains: ['live.com', 'microsoftonline.com', 'microsoft.com', 'office.com', 'outlook.com'] },
@@ -21,6 +22,8 @@
   const loginProvider = LOGIN_PROVIDERS.find((p) => p.hosts.includes(host));
 
   // ---------- tiny shadow-DOM UI ----------
+  // `html` is built only from fixed text plus values passed through esc(), so page content can't inject markup.
+  // full = a full-screen block page; otherwise a small warning box in the top-right corner.
   function shell(html, full) {
     const hostEl = document.createElement('div');
     hostEl.setAttribute('data-pg-ui', '');
@@ -42,6 +45,7 @@
   }
   const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
+  // Full-screen warning for a page on a threat list. "Continue" removes it; "Take me back" goes back (or to a blank page).
   function blockPage(threat) {
     const what = { phishing: 'a known phishing site (built to steal passwords and card details)', malware: 'a site known for spreading malware',
       c2: 'a server criminals use to control hacked computers', reported: 'a site you reported' }[threat.cat] || 'a known dangerous site';
@@ -54,6 +58,7 @@
   }
 
   let warned = false;
+  // Corner warning, shown at most once per page (the password alert resets `warned` to show its own).
   function warnBar(title, text) {
     if (warned) return;
     warned = true;
@@ -63,6 +68,8 @@
 
   // ---------- page checks ----------
   const hasPassword = () => !!document.querySelector('input[type="password"]');
+  // Runs fn once the page has a password box: now, or when one appears within the next minute (login forms are
+  // often added by scripts after the page loads).
   function whenPasswordField(fn) {
     if (hasPassword()) return fn();
     const obs = new MutationObserver(() => { if (hasPassword()) { obs.disconnect(); fn(); } });
@@ -70,6 +77,8 @@
     setTimeout(() => obs.disconnect(), 60000);
   }
 
+  // Asks the background worker about this page (is it on a list? was it opened from a risky email?) and warns:
+  // listed page -> block it; look-alike of a brand, or opened from a risky email -> warn if it asks for a password.
   async function checkPage() {
     let ctx = null;
     try { ctx = await chrome.runtime.sendMessage({ type: 'pg-guard-context', host, urlKeys: I.urlKeys(location.href) }); } catch (e) { return; }
@@ -86,6 +95,8 @@
   }
 
   // ---------- password alert ----------
+  // PBKDF2 (150,000 rounds) of the password, cut to 4 bytes. Slow and short on purpose: good enough to notice the
+  // same password being typed again, useless for working out what the password is.
   async function pwHash(salt, pw) {
     const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(pw), 'PBKDF2', false, ['deriveBits']);
     const bits = await crypto.subtle.deriveBits({ name: 'PBKDF2', salt: new TextEncoder().encode(salt), iterations: 150000, hash: 'SHA-256' }, key, 32);
@@ -93,6 +104,7 @@
   }
   async function pwSettings() { const s = await chrome.storage.local.get(['pwAlert']); return s.pwAlert || { enabled: false, entries: [] }; }
 
+  // On the provider's real sign-in page: when the user submits (Enter or a button), store the fragment and length.
   async function captureOnLoginPage(provider) {
     const save = async (input) => {
       const pw = input.value;
@@ -112,15 +124,16 @@
     }, true);
   }
 
+  // On every other site: when a password box holds as many characters as a stored password, hash it the same way
+  // and compare. Hashing is deliberately slow (~0.1 s), so while one check runs, the newest value waits for the next
+  // one instead of being dropped (otherwise the keystroke completing the password could be missed).
   async function watchForReuse() {
     const s = await pwSettings();
-    const entries = (s.entries || []).filter((e) => !e.domains.includes(reg));
+    const entries = (s.entries || []).filter((e) => !e.domains.includes(reg)); // never on the provider's own sites
     if (!s.enabled || !entries.length) return;
     const lens = new Set(entries.map((e) => e.len));
-    let busy = false;
-    document.addEventListener('input', async (e) => {
-      const el = e.target;
-      if (!el || !el.matches || !el.matches('input[type="password"]') || !lens.has(el.value.length) || busy) return;
+    let busy = false, queued = null;
+    const check = async (el) => {
       busy = true;
       try {
         for (const en of entries.filter((x) => x.len === el.value.length)) {
@@ -132,9 +145,17 @@
           }
         }
       } finally { busy = false; }
+      if (queued) { const next = queued; queued = null; if (lens.has(next.value.length)) check(next); }
+    };
+    document.addEventListener('input', (e) => {
+      const el = e.target;
+      if (!el || !el.matches || !el.matches('input[type="password"]') || !lens.has(el.value.length)) return;
+      if (busy) queued = el; else check(el);
     }, true);
   }
 
+  // ---------- start ----------
+  // On an email provider's sign-in page: learn the password (if the alert is on). Everywhere else: check the page.
   if (loginProvider) captureOnLoginPage(loginProvider);
   else { checkPage(); watchForReuse(); }
 })();
