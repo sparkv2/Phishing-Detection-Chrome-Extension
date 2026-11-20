@@ -280,9 +280,12 @@
     // Sender authentication (SPF/DKIM/DMARC) from the message's raw headers (Gmail only).
     if (adapter.fetchHeaders && m.messageId) {
       once('auth', async () => {
+        // "Show original" returns the whole raw message: headers for the authentication check, and the full structure
+        // for the header / signature / script tricks the page itself never shows (see inspectRawMessage).
         const raw = await adapter.fetchHeaders(m);
         ex.auth = raw ? A.parseAuthResults(raw) : null;
-        return !!ex.auth;
+        ex.raw = raw ? raw.slice(0, 2000000) : null;
+        return !!(ex.auth || ex.raw);
       });
     }
     // HTML attachments: read them as text (never render them) and look for login forms and hidden redirects.
@@ -343,7 +346,7 @@
       const key = keyOf(m.senderEmail, m.senderName, m.subject);
       const ex = extras.get(key) || {};
       // A fingerprint of what the banner was drawn from. Unchanged email + same finished checks = nothing to redraw.
-      const sig = bodyText.length + '|' + (m.senderEmail || '') + '|' + m.subject + '|' + ['auth', 'attHtml', 'qr', 'ai'].map((k) => (ex[k] ? 1 : 0)).join('');
+      const sig = bodyText.length + '|' + (m.senderEmail || '') + '|' + m.subject + '|' + ['auth', 'raw', 'attHtml', 'qr', 'ai'].map((k) => (ex[k] ? 1 : 0)).join('');
       const hasBanner = () => body.previousElementSibling && body.previousElementSibling.classList && body.previousElementSibling.classList.contains('pg-banner-host');
       if (body.dataset.pgSig === sig && hasBanner()) continue;
 
@@ -358,8 +361,8 @@
       const hist = e.hist;
       const attachments = (m.attachments || []).map((a) => Object.assign({}, a, { html: e.attHtml && e.attHtml[a.name] }));
       const result = A.analyzeEmail({ senderName: m.senderName, senderEmail: m.senderEmail, subject: m.subject, body: bodyText,
-        links, hasForm: P.hasForm(body), context: 'open', auth: e.auth, attachments, qrCodes: e.qr, history: hist, ai: e.ai,
-        thread: m.thread }, lists());
+        links, hasForm: P.hasForm(body), context: 'open', auth: e.auth, rawMessage: e.raw || undefined, attachments, qrCodes: e.qr,
+        history: hist, ai: e.ai, thread: m.thread }, lists());
       if (hasBanner()) body.previousElementSibling.remove();
       body.dataset.pgSig = sig;
 

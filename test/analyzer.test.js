@@ -78,6 +78,64 @@ test('attachment names reversed with an invisible right-to-left character are ca
   assert.ok(!sigs.some((s) => s.evidence.includes('report')), 'a harmless invisible mark on a real PDF must not be flagged');
 });
 
+// ---------- raw-message tricks (tuned on the EPVME dataset; see tools/eval-dataset.mjs) ----------
+const RAW = (headers, body) => headers.join('\r\n') + '\r\n\r\n' + body;
+const flags = (raw) => A.inspectRawMessage(raw);
+const SIG = 'MIIG' + 'A'.repeat(3000); // stands in for a real S/MIME signature (thousands of base64 characters)
+
+test('raw message: forgery tricks are found', () => {
+  assert.ok(flags(RAW(['From: alerts@bank.example', 'From: "Bank Security" <security@realbank.example>', 'Subject: hi'], 'x')).multipleFrom);
+  assert.ok(flags(RAW(['  From: test@attack.example', 'From: ceo@company.example'], 'x')).multipleFrom, 'indented injected From');
+  assert.ok(flags(RAW(['From: =?utf-8?b?bHVib3dza2lAdmlzYS5jb20==?='], 'x')).encodedAddress, 'address hidden in base64 with bad padding');
+  assert.ok(flags(RAW(['From: a@b.example', 'To: <"victim<img src=1 onerror=alert(1)>@victim.example">'], 'x')).headerMarkup);
+  assert.ok(flags(RAW(['From: a@b.example', 'Content-Type: text/html'], '<p>hi</p><img src=x onerror="steal()">')).script);
+  const shortSig = RAW(['From: a@b.example', 'Content-Type: multipart/signed; protocol="application/x-pkcs7-signature"; boundary="B"'],
+    'Buy now at cheap-pills.example, best prices!!!\r\n--B\r\nContent-Type: text/plain\r\n\r\nhello\r\n--B\r\nContent-Type: application/x-pkcs7-signature; name="smime.p7s"\r\nContent-Transfer-Encoding: base64\r\n\r\nMIIBqzCCAV\r\n--B--');
+  assert.ok(flags(shortSig).brokenSignature, 'signature far too short');
+  assert.ok(flags(shortSig).unsignedPreamble, 'text placed before the signed part');
+  const hidden = RAW(['From: a@b.example', 'Content-Type: multipart/mixed; boundary="D"'],
+    '--D\r\nContent-Type: text/html\r\n\r\n<p>Pay to account 123</p><style>br{display:none}</style><div style="display:none"><plaintext>\r\n' +
+    '--D\r\nContent-Type: multipart/signed; boundary="S"; protocol="application/pgp-signature"\r\n\r\n--S\r\nContent-Type: text/plain\r\n\r\nreal signed text\r\n--S--\r\n--D--');
+  assert.ok(flags(hidden).hiddenSignedPart, 'signed part hidden behind forged text');
+});
+
+test('raw message: ordinary mail structures are NOT flagged', () => {
+  const none = (raw, what) => { const f = flags(raw); for (const [k, v] of Object.entries(f)) assert.ok(!v, `${what}: ${k} flagged`); };
+  none(RAW(['From: =?utf-8?b?w4lsb2RpZSBEdXBvbnQ=?= <elodie@example.fr>', 'Subject: =?utf-8?q?R=C3=A9union_demain?='], 'Bonjour'), 'encoded non-English name');
+  none(RAW(['From: dev@list.example', 'Subject: Re: <div> tags render oddly in Gmail', 'Content-Type: text/html'],
+    '<div style="display:none">Preview text for the inbox</div><p>Use a table instead.</p>'), 'HTML talk + newsletter preheader');
+  none(RAW(['From: "Sarah" <sarah@acme.example>', 'Content-Type: multipart/signed; protocol="application/x-pkcs7-signature"; micalg=sha-256; boundary="B"'],
+    'This is an S/MIME signed message\r\n\r\n--B\r\nContent-Type: text/plain\r\n\r\nSigned hello\r\n--B\r\nContent-Type: application/x-pkcs7-signature; name="smime.p7s"\r\n' +
+    'Content-Transfer-Encoding: base64\r\n\r\n' + SIG + '\r\n--B--'), 'genuine S/MIME signed email');
+  none(RAW(['From: alice@lists.example', 'Content-Type: multipart/mixed; boundary="M"'],
+    '--M\r\nContent-Type: multipart/signed; boundary="S"; protocol="application/pgp-signature"\r\n\r\n--S\r\nContent-Type: text/plain\r\n\r\nSigned post\r\n' +
+    '--S\r\nContent-Type: application/pgp-signature\r\n\r\n-----BEGIN PGP SIGNATURE-----\r\niQEz...\r\n-----END PGP SIGNATURE-----\r\n--S--\r\n' +
+    '--M\r\nContent-Type: text/plain\r\n\r\n_______________\r\nlist footer: unsubscribe at lists.example\r\n--M--'), 'mailing list wrapping a signed post');
+  none(RAW(['From: rw@example.at', 'Content-Type: multipart/signed; boundary="P"; protocol="application/pgp-signature"'],
+    "This is a multi-part message in MIME format.\r\nIt has been signed conforming to RFC2015.\r\nYou'll need PGP or GPG to check the signature.\r\n\r\n" +
+    '--P\r\nContent-Type: text/plain\r\n\r\nHello list\r\n--P\r\nContent-Type: application/pgp-signature\r\n\r\n-----BEGIN PGP SIGNATURE-----\r\niD8D...\r\n-----END PGP SIGNATURE-----\r\n--P--'),
+    'PGP mail program\'s stock note before the signed part');
+});
+
+// Seen on real mailing-list mail (SpamAssassin corpus): web addresses aren't file attachments.
+test('mentioned file names: web addresses are not risky files', () => {
+  const att = (body) => A.analyzeEmail({ context: 'open', senderEmail: 'a@b.example', subject: 'x', body, links: [] }, {})
+    .signals.some((s) => s.id === 'risky-attachment');
+  assert.ok(!att('Download the file from example.com today'), '.com domain');
+  assert.ok(!att('The document is at http://site.example/docs/index.html'), 'URL path');
+  assert.ok(!att('Open the file at www.site.example/readme.html'), 'www address');
+  assert.ok(att('Please open the attached invoice_2291.html to view it'), 'a real .html attachment mention');
+  assert.ok(att('Open the attached file setup.exe now'), 'an .exe mention');
+});
+
+test('raw-message tricks change the verdict, and survive "trusted sender"', () => {
+  const raw = RAW(['From: ceo@company.example', 'From: "CEO" <ceo.office@gmail.com>', 'Subject: Quick task'], 'Can you help with something today?');
+  const r = A.analyzeEmail({ context: 'open', senderName: 'CEO', senderEmail: 'ceo@company.example', subject: 'Quick task', body: 'Can you help with something today?',
+    links: [], rawMessage: raw }, { trusted: new Set(['ceo@company.example']) });
+  assert.equal(r.level, 'suspicious', describe(r));
+  assert.ok(r.signals.some((s) => s.id === 'multiple-from'));
+});
+
 // ---------- payment changes & reply-chain hijack ----------
 test('bank details: valid IBAN / routing / sort code found, invalid numbers ignored', () => {
   const found = A.findBankDetails('IBAN GB82 WEST 1234 5698 7654 32, bad IBAN GB00 WEST 1234 5698 7654 32, ' +
