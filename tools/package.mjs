@@ -12,15 +12,18 @@ const INCLUDE = ['manifest.json', 'background.js', 'src', 'popup', 'offscreen', 
 const targets = process.argv.slice(2).length ? process.argv.slice(2) : ['chrome', 'edge', 'firefox'];
 const base = JSON.parse(readFileSync(join(root, 'manifest.json'), 'utf8'));
 
+// The manifest each store gets. Every store copy drops the file:// match used by the local demo inbox: a published
+// extension has no reason to touch local files, and reviewers ask about it.
 function manifestFor(target) {
   const m = structuredClone(base);
+  m.content_scripts = m.content_scripts.map((c) => Object.assign({}, c, { matches: c.matches.filter((x) => !x.startsWith('file:')) }));
   if (target === 'firefox') {
     // Firefox runs MV3 background scripts as an event page instead of a service worker, and has no offscreen
     // documents or built-in AI model, so the on-device AI option simply reports "not supported" there.
     m.background = { scripts: ['src/data.js', 'src/analyzer.js', 'src/intel.js', 'src/selectors.js', 'vendor/jsQR.js', 'background.js'] };
     m.permissions = m.permissions.filter((p) => p !== 'offscreen');
-    m.browser_specific_settings = { gecko: { id: process.env.TRIPWIRE_GECKO_ID || 'tripwire@example.com', strict_min_version: '128.0' } };
-    m.content_scripts = m.content_scripts.map((c) => Object.assign({}, c, { matches: c.matches.filter((x) => !x.startsWith('file:')) }));
+    // The add-on's permanent ID on addons.mozilla.org. It must never change after the first upload.
+    m.browser_specific_settings = { gecko: { id: process.env.TRIPWIRE_GECKO_ID || 'tripwire@sparkv2.com', strict_min_version: '128.0' } };
   }
   return m;
 }
