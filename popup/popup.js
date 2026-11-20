@@ -14,7 +14,7 @@ let currentHost = null;
 const ALL_SITES = ['https://*/*', 'http://*/*'];
 
 async function render() {
-  const s = await chrome.storage.local.get(['enabled', 'stats', 'trusted', 'blocked', 'useFeed', 'communityEnabled', 'shareReports', 'enabledHosts', 'disabledHosts',
+  const s = await chrome.storage.local.get(['enabled', 'stats', 'trusted', 'blocked', 'useFeed', 'communityEnabled', 'shareReports', 'enabledHosts', 'disabledHosts', 'layoutRules',
     'expandLinks', 'guardEnabled', 'pwAlert', 'aiEnabled', 'health']);
   renderExtras(s);
   const st = s.stats || {};
@@ -26,6 +26,10 @@ async function render() {
   renderList('trustList', 'trustCount', s.trusted || [], 'trusted', 'No trusted senders yet.');
   renderList('blockList', 'blockCount', s.blocked || [], 'blocked', 'You haven\'t reported anyone yet.');
   $('useFeed').checked = s.useFeed !== false;
+  const lr = s.layoutRules;
+  $('rulesInfo').textContent = lr
+    ? `Webmail layout rules: version ${lr.version}, updated ${new Date(lr.installed).toLocaleDateString()} (signed, checked on your device).`
+    : `Webmail layout rules: built-in version ${PG_Selectors.BUILTIN.version}.`;
   $('communityEnabled').checked = s.communityEnabled !== false;
   $('shareReports').checked = !!s.shareReports;
   renderIntel(s); // don't wait on the (possibly large) list load

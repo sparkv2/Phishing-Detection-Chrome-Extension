@@ -48,13 +48,14 @@
   }
 
   async function loadState() {
-    const s = await chrome.storage.local.get(['enabled', 'aiEnabled', 'trusted', 'blocked', 'enabledHosts', 'disabledHosts']);
+    const s = await chrome.storage.local.get(['enabled', 'aiEnabled', 'trusted', 'blocked', 'enabledHosts', 'disabledHosts', 'layoutRules']);
     state.enabled = s.enabled !== false;
     state.aiEnabled = !!s.aiEnabled;
     state.trusted = new Set(s.trusted || []);
     state.blocked = new Set(s.blocked || []);
     state.enabledHosts = s.enabledHosts || [];
     state.disabledHosts = s.disabledHosts || [];
+    P.configure(s.layoutRules || null); // updated webmail layout rules (signature-checked by the background worker), or built-in
   }
 
   function shouldRun() {
@@ -95,33 +96,80 @@
     if (tokens.every((t) => D.SERVICE_WORDS.includes(t))) return null;
     return tokens.join(' ');
   }
-  async function historyFor(senderName, senderEmail, msgKey) {
+  // Uncached salted hash, for the hundreds of look-alike candidates checked per new sender.
+  async function hashOnce(value) {
+    const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(history.data.salt + '|' + value));
+    return [...new Uint8Array(buf).slice(0, 8)].map((b) => b.toString(16).padStart(2, '0')).join('');
+  }
+  const otherMessages = (rec, mk) => (rec ? rec.m.filter((k) => k !== mk).length : 0);
+
+  // opts.deep: also look for look-alikes of people you correspond with (opened emails only, it hashes ~1,000 candidates).
+  // opts.banks: bank identifiers found in this email ([{type, id}]), compared with the ones this sender used before.
+  async function historyFor(senderName, senderEmail, msgKey, opts) {
+    opts = opts || {};
     const email = lc(senderEmail);
     if (!email.includes('@')) return null;
     const h = await loadHistory();
+    h.domains = h.domains || {};
+    const reg = A.registrableDomain(email.split('@').pop());
+    const free = D.FREE_MAIL.includes(reg);
     const sh = await hash('s:' + email), mk = (await hash('m:' + msgKey)).slice(0, 8);
-    const dh = await hash('d:' + A.registrableDomain(email.split('@').pop()));
+    const dh = await hash('d:' + reg);
     const pn = personName(senderName);
     const nh = pn ? await hash('n:' + pn) : null;
     const rec = h.senders[sh];
-    const seenBefore = !!(rec && rec.m.some((k) => k !== mk));
+    const seenBefore = otherMessages(rec, mk) > 0;
+    const knownDomain = !free && otherMessages(h.domains[dh], mk) > 0;
     let nameKnownElsewhere = false;
     if (nh && !seenBefore && h.names[nh]) {
       nameKnownElsewhere = h.names[nh].s.some((o) => o.s !== sh && o.d !== dh && h.senders[o.s] && h.senders[o.s].m.length >= 2);
     }
     const mature = Date.now() - h.since > 14 * DAY || Object.keys(h.senders).length >= 150;
+
+    // Look-alike of a domain (or, for free mail, an address) you've had at least 2 emails from.
+    let lookalikeOf = null, lookalikeAddress = null;
+    if (opts.deep && !seenBefore && !knownDomain) {
+      const cand = A.lookalikeCandidates(email);
+      for (const d of cand.domains) {
+        const x = h.domains[await hashOnce('d:' + d)];
+        if (x && x.m.length >= 2) { lookalikeOf = d; break; }
+      }
+      if (!lookalikeOf) for (const a of cand.addresses) {
+        const x = h.senders[await hashOnce('s:' + a)];
+        if (x && x.m.length >= 2) { lookalikeAddress = a; break; }
+      }
+    }
+
+    // Bank details: fingerprints per company domain (per address for free mail), compared with earlier emails.
+    const holder = free ? (h.senders[sh] || null) : (h.domains[dh] || null);
+    const bankHashes = [];
+    for (const b of opts.banks || []) bankHashes.push((await hash('b:' + b.type + ':' + b.id)).slice(0, 12));
+    const bankChanged = !!(bankHashes.length && holder && (holder.b || []).length && (free ? seenBefore : knownDomain)
+      && !bankHashes.some((x) => holder.b.includes(x)));
+
     // Record this message after judging it, so it doesn't vouch for itself.
     const today = Math.floor(Date.now() / DAY);
     const r = h.senders[sh] || (h.senders[sh] = { d: today, m: [] });
     r.d = today;
     if (!r.m.includes(mk)) { r.m.push(mk); if (r.m.length > 12) r.m.shift(); history.dirty = true; }
+    if (!free) {
+      const dr = h.domains[dh] || (h.domains[dh] = { d: today, m: [] });
+      dr.d = today;
+      if (!dr.m.includes(mk)) { dr.m.push(mk); if (dr.m.length > 12) dr.m.shift(); history.dirty = true; }
+    }
     if (nh) {
       const n = h.names[nh] || (h.names[nh] = { d: today, s: [] });
       n.d = today;
       if (!n.s.some((o) => o.s === sh)) { n.s.push({ s: sh, d: dh }); if (n.s.length > 6) n.s.shift(); history.dirty = true; }
     }
+    // Remember bank details only from senders you already know, so a scammer's first email can't set the "usual" account.
+    if (bankHashes.length && !bankChanged && (free ? seenBefore : knownDomain)) {
+      const target = free ? r : h.domains[dh];
+      target.b = target.b || [];
+      for (const x of bankHashes) if (!target.b.includes(x)) { target.b.push(x); if (target.b.length > 6) target.b.shift(); history.dirty = true; }
+    }
     saveHistorySoon();
-    return { seenBefore, mature, nameKnownElsewhere };
+    return { seenBefore, mature, nameKnownElsewhere, knownDomain, lookalikeOf, lookalikeAddress, bankChanged, bankChangedDomain: bankChanged ? reg : null };
   }
   function saveHistorySoon() {
     if (!history.dirty) return;
@@ -132,6 +180,8 @@
       if (keys.length > 6000) keys.sort((a, b) => h.senders[a].d - h.senders[b].d).slice(0, keys.length - 6000).forEach((k) => delete h.senders[k]);
       const names = Object.keys(h.names);
       if (names.length > 6000) names.sort((a, b) => h.names[a].d - h.names[b].d).slice(0, names.length - 6000).forEach((k) => delete h.names[k]);
+      const doms = Object.keys(h.domains || {});
+      if (doms.length > 3000) doms.sort((a, b) => h.domains[a].d - h.domains[b].d).slice(0, doms.length - 3000).forEach((k) => delete h.domains[k]);
       history.dirty = false;
       try { await chrome.storage.local.set({ senderHistory: h }); } catch (e) { /* extension reloaded */ }
     }, 3000);
@@ -211,17 +261,18 @@
     }
     if (m.images && m.images.length) {
       once('qr', async () => {
-        const srcs = [];
+        const srcs = [], original = new Map(); // what the background fetches -> the image's real src on the page
         for (const src of m.images) {
-          if (!src.startsWith('blob:')) { srcs.push(src); continue; }
+          if (!src.startsWith('blob:')) { srcs.push(src); original.set(src, src); continue; }
           try { // blob: URLs only work in this page, so hand the background a data: copy
             const b = await (await fetch(src)).blob();
             if (b.size > 3e6) continue;
-            srcs.push(await new Promise((res) => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.readAsDataURL(b); }));
+            const dataUrl = await new Promise((res) => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.readAsDataURL(b); });
+            srcs.push(dataUrl); original.set(dataUrl, src);
           } catch (e) { /* revoked */ }
         }
         const r = await send({ type: 'pg-qr', srcs });
-        ex.qr = r || [];
+        ex.qr = (r || []).map((q) => ({ data: q.data, src: original.get(q.src) || q.src })); // src lets "Show me" find the image
         if (!ex.qr.length) return false;
         const t = linkTargets(ex.qr.map((q) => ({ href: /^https?:/i.test(q.data) ? q.data : 'https://' + q.data })));
         await lookupThreats(t.hosts, t.urls);
@@ -252,12 +303,15 @@
       const targets = linkTargets(links);
       await lookupThreats([senderDomain(m.senderEmail), ...targets.hosts], targets.urls);
       if (!body.isConnected) continue; // the email was closed while we were checking
-      const listVerdict = verdicts.get(key);
-      const hist = listVerdict && listVerdict.hist ? listVerdict.hist : await historyFor(m.senderName, m.senderEmail, key);
       const e = enrich(key, m, bodyText);
+      // Full history check once per opened email: look-alikes of people you correspond with, and changed bank details.
+      if (!e.hist) e.hist = await historyFor(m.senderName, m.senderEmail, key, { deep: true, banks: A.findBankDetails(m.subject + '\n' + bodyText) });
+      if (!body.isConnected) continue;
+      const hist = e.hist;
       const attachments = (m.attachments || []).map((a) => Object.assign({}, a, { html: e.attHtml && e.attHtml[a.name] }));
       const result = A.analyzeEmail({ senderName: m.senderName, senderEmail: m.senderEmail, subject: m.subject, body: bodyText,
-        links, hasForm: P.hasForm(body), context: 'open', auth: e.auth, attachments, qrCodes: e.qr, history: hist, ai: e.ai }, lists());
+        links, hasForm: P.hasForm(body), context: 'open', auth: e.auth, attachments, qrCodes: e.qr, history: hist, ai: e.ai,
+        thread: m.thread }, lists());
       if (hasBanner()) body.previousElementSibling.remove();
       body.dataset.pgSig = sig;
 
@@ -270,6 +324,7 @@
         reportHelp: adapter.reportHelp,
         pending,
         onReport: () => report(result.sender, result.verifiedBrand),
+        onShow: (s) => showMe(m, links, result, s),
         onTrust: () => updateList('trusted', result.sender.email, true),
         onUntrust: () => updateList('trusted', result.sender.email, false),
       });
@@ -277,6 +332,59 @@
       guardLinks(body, links, result);
     }
     return opened.length;
+  }
+
+  // ---------- "Show me": point at the exact part of the email a reason is about ----------
+  // Elements get a pulsing outline; words get the browser's built-in text highlight (CSS Custom Highlight API),
+  // which marks text without changing the email's page structure. Both clear after a few seconds.
+  let showTimer = null;
+  function clearShow() {
+    document.querySelectorAll('.pg-show').forEach((el) => el.classList.remove('pg-show'));
+    try { if (window.CSS && CSS.highlights) CSS.highlights.delete('tripwire-show'); } catch (e) { /* unsupported */ }
+  }
+  function textRanges(roots, phrases) {
+    const res = [...new Set((phrases || []).filter((p) => p && p.trim().length >= 2))]
+      .map((p) => new RegExp(p.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+'), 'gi'));
+    const ranges = [];
+    for (const root of roots.filter(Boolean)) {
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+        acceptNode: (n) => (n.parentElement && n.parentElement.closest('[data-pg-ui], script, style') ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT) });
+      for (let n = walker.nextNode(); n && ranges.length < 50; n = walker.nextNode()) {
+        for (const re of res) {
+          re.lastIndex = 0;
+          for (let mt = re.exec(n.data); mt && ranges.length < 50; mt = re.exec(n.data)) {
+            if (!mt[0]) { re.lastIndex++; continue; }
+            const r = document.createRange(); r.setStart(n, mt.index); r.setEnd(n, mt.index + mt[0].length); ranges.push(r);
+          }
+        }
+      }
+    }
+    return ranges;
+  }
+  function hostOf(href) { const u = A.unwrapUrl(expanded.get((href || '').trim()) || href); return u && u.hostname !== 'invalid.local' ? lc(u.hostname) : ''; }
+  function showMe(m, links, result, s) {
+    const t = s.target || {};
+    clearShow(); clearTimeout(showTimer);
+    let els = [], ranges = [];
+    if (t.type === 'sender') els = [m.senderEl];
+    else if (t.type === 'subject') els = [m.subjectEl];
+    else if (t.type === 'form') els = [...m.body.querySelectorAll('form, input, textarea, select')];
+    else if (t.type === 'link') els = links.filter((l) => (t.href && l.href.trim() === t.href) || (t.host && hostOf(l.href) === t.host)).map((l) => l.el);
+    else if (t.type === 'image') els = [...(m.scope || m.body).querySelectorAll('img')].filter((i) => t.src && (i.currentSrc === t.src || i.src === t.src));
+    else if (t.type === 'attachment') {
+      const name = lc(t.name);
+      els = [...(m.scope || document).querySelectorAll('[title], [aria-label], span, div, a')]
+        .filter((e) => !m.body.contains(e) && !e.closest('[data-pg-ui]') && lc((e.getAttribute('title') || '') + ' ' + (e.getAttribute('aria-label') || '') + ' ' + (e.children.length ? '' : e.textContent)).includes(name))
+        .slice(0, 1);
+    } else if (t.type === 'text') ranges = textRanges([m.subjectEl, m.body], t.phrases);
+    els = els.filter((e) => e && e.isConnected);
+    if (!els.length && !ranges.length) return 0;
+    els.forEach((e) => e.classList.add('pg-show'));
+    if (ranges.length && window.CSS && CSS.highlights && window.Highlight) CSS.highlights.set('tripwire-show', new Highlight(...ranges));
+    const first = els[0] || (ranges[0] && ranges[0].startContainer.parentElement);
+    if (first) first.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    showTimer = setTimeout(clearShow, 6000);
+    return els.length + ranges.length;
   }
 
   function linkInfoFor(anchor, links, result) {
@@ -458,7 +566,7 @@
   chrome.storage.onChanged.addListener(async (changes, area) => {
     if (area !== 'local') return;
     const keys = Object.keys(changes);
-    if (keys.every((k) => ['stats', 'signalCounts', 'senderHistory', 'health', 'intelNewest'].includes(k))) return;
+    if (keys.every((k) => ['stats', 'signalCounts', 'senderHistory', 'health', 'intelNewest', 'layoutRulesChecked'].includes(k))) return;
     if (keys.includes('intelUpdated')) threats.clear(); // threat lists were refreshed: re-check everything
     await loadState();
     resetAll();
@@ -467,7 +575,7 @@
 
   chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
     if (msg && msg.type === 'pg-status') {
-      reply({ active: state.active, provider: adapter ? adapter.label : '', known: adapter ? adapter.id !== 'generic' : false, host: HOST });
+      reply({ active: state.active, provider: adapter ? adapter.label : '', known: adapter ? adapter.id !== 'generic' : false, host: HOST, rules: P.rulesVersion() });
     }
   });
 

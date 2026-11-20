@@ -15,7 +15,7 @@
 
   function judge(lesson) {
     const x = lesson.extra || {};
-    const input = Object.assign({ context: 'open' }, lesson.email, { auth: x.auth, attachments: x.attachments, qrCodes: x.qrCodes, history: x.history });
+    const input = Object.assign({ context: 'open' }, lesson.email, { auth: x.auth, attachments: x.attachments, qrCodes: x.qrCodes, history: x.history, thread: x.thread });
     return A.analyzeEmail(input, { expanded: new Map(x.expanded || []) });
   }
 

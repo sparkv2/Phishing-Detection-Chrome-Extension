@@ -259,11 +259,24 @@
   // metaBytes: ArrayBuffer/Uint8Array of meta.json exactly as downloaded; sig: base64 text; bin: ArrayBuffer.
   // opts.notOlderThan: ISO date of the list currently in use (stops an attacker replaying an old signed list).
   // Returns the parsed meta on success; throws with a reason otherwise.
-  async function verifyIntel(metaBytes, sig, bin, opts) {
+  // Throws unless `sig` (base64) is the project's Ed25519 signature over exactly `bytes`.
+  async function verifySigned(bytes, sig, opts) {
     opts = opts || {};
     const subtle = (opts.crypto || root.crypto).subtle;
     const key = await subtle.importKey('raw', b64(opts.publicKey || SIGNING_PUBLIC_KEY), { name: 'Ed25519' }, false, ['verify']);
-    if (!(await subtle.verify({ name: 'Ed25519' }, key, b64(sig), metaBytes))) throw new Error('bad signature');
+    if (!(await subtle.verify({ name: 'Ed25519' }, key, b64(sig), bytes))) throw new Error('bad signature');
+  }
+
+  // Webmail layout rules (data/selectors.json): signed like the list; returns the parsed rules.
+  async function verifyRules(bytes, sig, opts) {
+    await verifySigned(bytes, sig, opts);
+    return JSON.parse(new TextDecoder().decode(bytes));
+  }
+
+  async function verifyIntel(metaBytes, sig, bin, opts) {
+    opts = opts || {};
+    const subtle = (opts.crypto || root.crypto).subtle;
+    await verifySigned(metaBytes, sig, opts);
     const meta = JSON.parse(new TextDecoder().decode(metaBytes));
     if (!meta.binSha256 || hex(await subtle.digest('SHA-256', bin)) !== meta.binSha256) throw new Error('list does not match its signed checksum');
     const generated = Date.parse(meta.generated);
@@ -275,6 +288,6 @@
     return meta;
   }
 
-  root.PG_Intel = { SIGNING_PUBLIC_KEY, verifyIntel, lookupHost, SOURCES, SUBDOMAIN_PLATFORMS, PROTECTED, parseFeed, urlKeys, hostIsFlaggable, hostAndParents, hostFromLine, CATEGORY_TEXT,
+  root.PG_Intel = { SIGNING_PUBLIC_KEY, verifyIntel, verifySigned, verifyRules, lookupHost, SOURCES, SUBDOMAIN_PLATFORMS, PROTECTED, parseFeed, urlKeys, hostIsFlaggable, hostAndParents, hostFromLine, CATEGORY_TEXT,
     hash53, buildCompact, serializeCompact, parseCompact, lookupCompact, compactRecords, mergeCompact, sourceEntries };
 })(typeof globalThis !== 'undefined' ? globalThis : this);

@@ -6,6 +6,9 @@ on:
   schedule:
     - cron: '23 */6 * * *'
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['data/selectors.json']   # a webmail layout fix goes out right away, not at the next scheduled run
 
 permissions:
   contents: write   # to update the release assets
@@ -30,17 +33,25 @@ jobs:
         run: |
           if [ -z "$TRIPWIRE_SIGNING_KEY" ]; then echo "::error::Add the TRIPWIRE_SIGNING_KEY repository secret first."; exit 1; fi
           node tools/sign-intel.mjs out
-      - name: Check the signature with the key the extension ships
+          cp data/selectors.json out/selectors.json
+          node tools/sign-intel.mjs --file out/selectors.json
+      - name: Check the signatures with the key the extension ships
         run: |
           node -e "
-            for (const f of ['src/data.js','src/analyzer.js','src/intel.js']) require('./' + f);
+            for (const f of ['src/data.js','src/analyzer.js','src/intel.js','src/selectors.js']) require('./' + f);
             const fs = require('fs');
-            PG_Intel.verifyIntel(fs.readFileSync('out/threat-intel.meta.json'), fs.readFileSync('out/threat-intel.meta.json.sig','utf8'), fs.readFileSync('out/threat-intel.bin'))
-              .then((m) => console.log('verified', m.generated, m.total), (e) => { console.error(e.message); process.exit(1); });"
+            (async () => {
+              const m = await PG_Intel.verifyIntel(fs.readFileSync('out/threat-intel.meta.json'), fs.readFileSync('out/threat-intel.meta.json.sig','utf8'), fs.readFileSync('out/threat-intel.bin'));
+              console.log('list verified', m.generated, m.total);
+              const r = await PG_Intel.verifyRules(fs.readFileSync('out/selectors.json'), fs.readFileSync('out/selectors.json.sig','utf8'));
+              if (r.format !== 1 || !Number.isInteger(r.version)) throw new Error('selectors.json: bad format');
+              console.log('layout rules verified, version', r.version);
+            })().catch((e) => { console.error(e.message); process.exit(1); });"
       - name: Publish to the intel-latest release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release view intel-latest >/dev/null 2>&1 || gh release create intel-latest --prerelease --title "Signed threat list (auto-updated)" \
             --notes "Rebuilt every 6 hours by .github/workflows/publish-intel.yml. Verify with the public key in src/intel.js."
-          gh release upload intel-latest out/threat-intel.bin out/threat-intel.meta.json out/threat-intel.meta.json.sig --clobber
+          gh release upload intel-latest out/threat-intel.bin out/threat-intel.meta.json out/threat-intel.meta.json.sig \
+            out/selectors.json out/selectors.json.sig --clobber

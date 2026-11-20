@@ -7,13 +7,13 @@
 // - Registers Tripwire on extra webmail sites the user enables, and the optional page guard.
 // Privacy: nothing about the user's email is sent anywhere. Network use: feed downloads, shortener lookups
 // (only for links the user is about to open), and re-fetching images already shown in the email (for QR codes).
-if (typeof importScripts === 'function') importScripts('src/data.js', 'src/analyzer.js', 'src/intel.js', 'vendor/jsQR.js');
+if (typeof importScripts === 'function') importScripts('src/data.js', 'src/analyzer.js', 'src/intel.js', 'src/selectors.js', 'vendor/jsQR.js');
 const I = self.PG_Intel;
 const D = self.PG_DATA;
 const A = self.PG_Analyzer;
 const CACHE = 'tripwire-intel-v2';
 const REFRESH_MINUTES = 720;
-const CONTENT_JS = ['src/data.js', 'src/analyzer.js', 'src/intel.js', 'src/providers.js', 'src/ui.js', 'src/content.js'];
+const CONTENT_JS = ['src/data.js', 'src/analyzer.js', 'src/intel.js', 'src/selectors.js', 'src/providers.js', 'src/ui.js', 'src/content.js'];
 const CONTENT_CSS = ['src/content.css'];
 const GUARD_JS = ['src/data.js', 'src/analyzer.js', 'src/intel.js', 'src/guard.js'];
 const MANIFEST_HOSTS = (chrome.runtime.getManifest().content_scripts || []).flatMap((c) => c.matches);
@@ -179,11 +179,32 @@ async function updateCommunity(c) {
   } catch (e) { /* keep the previous copy */ }
 }
 
+// ---------------- webmail layout rules ----------------
+// When Gmail, Outlook or Yahoo change their page layout, a fixed data/selectors.json is signed by GitHub Actions and
+// mirrored by the Tripwire server. It is only used with a valid signature, a higher version than the rules in use,
+// and if this extension version is new enough for it. Open tabs pick it up through storage.onChanged.
+async function updateRules(reason) {
+  const { layoutRules } = await chrome.storage.local.get(['layoutRules']);
+  await chrome.storage.local.set({ layoutRulesChecked: Date.now() });
+  try {
+    const opts = { cache: 'no-store', credentials: 'omit', referrerPolicy: 'no-referrer' };
+    const [r, s] = await Promise.all(['selectors.json', 'selectors.json.sig'].map((n) => fetch(SERVER + '/v1/intel/' + n, opts)));
+    if (!r.ok || !s.ok) return { ok: false, reason: 'unavailable' };
+    const rules = await I.verifyRules(await r.arrayBuffer(), await s.text()); // throws on a bad signature
+    const verdict = self.PG_Selectors.acceptRules(rules, { currentVersion: layoutRules ? layoutRules.version : 0,
+      extensionVersion: chrome.runtime.getManifest().version });
+    if (!verdict.ok) return { ok: false, reason: verdict.reason };
+    await chrome.storage.local.set({ layoutRules: { version: rules.version, adapters: rules.adapters, installed: Date.now(), reason: reason || 'update' } });
+    return { ok: true, version: rules.version };
+  } catch (e) { console.warn('[Tripwire] layout rules not used:', e.message); return { ok: false, reason: e.message }; }
+}
+
 async function updateFeeds() {
   const { useFeed } = await chrome.storage.local.get(['useFeed']);
   if (useFeed === false) return { ok: false, reason: 'disabled' };
   const c = await caches.open(CACHE);
   await updateCommunity(c);
+  await updateRules('scheduled');
   if (await updateFromServer(c)) {
     indexPromise = null;
     await chrome.storage.local.set({ intelUpdated: Date.now() });
@@ -281,7 +302,7 @@ async function decodeQr(src) {
 async function decodeQrList(srcs) {
   const out = [];
   for (const src of (srcs || []).slice(0, 8)) {
-    try { const data = await decodeQr(src); if (data) out.push({ data }); } catch (e) { /* not an image we can read */ }
+    try { const data = await decodeQr(src); if (data) out.push({ data, src }); } catch (e) { /* not an image we can read */ }
   }
   return out;
 }
@@ -377,6 +398,11 @@ chrome.tabs.onRemoved.addListener((tabId) => chrome.storage.session.remove('risk
 
 // ---------------- health (webmail layout changes) ----------------
 async function setHealth(tabId, report) {
+  // A site stopped matching the rules: look for a published fix now instead of at the next update (at most every 30 min).
+  if (!report.ok) {
+    const { layoutRulesChecked } = await chrome.storage.local.get(['layoutRulesChecked']);
+    if (!layoutRulesChecked || Date.now() - layoutRulesChecked > 30 * 60 * 1000) updateRules('health-check');
+  }
   const s = await chrome.storage.local.get(['health']);
   const health = s.health || {};
   const prev = health[report.adapter] || {};

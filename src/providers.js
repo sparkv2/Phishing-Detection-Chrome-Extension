@@ -67,7 +67,7 @@
       const email = attrEl.getAttribute('email') || attrEl.getAttribute('data-email') || attrEl.getAttribute('data-hovercard-id')
         || ((attrEl.getAttribute('title') || attrEl.getAttribute('aria-label') || '').match(EMAIL_RE) || [''])[0];
       const name = attrEl.getAttribute('name') || text(attrEl).replace(EMAIL_RE, '').replace(/[<>]/g, '').trim();
-      if (email) return { name, email };
+      if (email) return { name, email, el: attrEl };
     }
     // Text like "Jane Doe <jane@example.com>" in a header area
     // Pick the smallest element containing an address, then take the name from it or its parent.
@@ -83,25 +83,46 @@
       const clean = (s) => s.replace(email, '').replace(/[<>"]/g, '').replace(/^\s*from:?\s*/i, '').trim();
       let name = clean(text(best));
       if (!name && best.parentElement && text(best.parentElement).length < 120) name = clean(text(best.parentElement));
-      return { name, email };
+      return { name, email, el: best };
     }
     return { name: '', email: '' };
   }
+
+  // ---------------- layout rules (src/selectors.js) ----------------
+  // Every selector below comes from the rules: an updated, signature-checked copy if the background worker has one,
+  // otherwise the built-in copy. For each lookup the updated rule is tried first; if it finds nothing, the built-in
+  // rule is tried, so a bad update can't make things worse than before.
+  let RULES = null;
+  const validity = new Map();
+  function isValidSelector(sel) {
+    if (!validity.has(sel)) { try { document.createDocumentFragment().querySelector(sel); validity.set(sel, true); } catch (e) { validity.set(sel, false); } }
+    return validity.get(sel);
+  }
+  const sels = (id, key) => root.PG_Selectors.candidates(RULES, id, key, isValidSelector);
+  function $$r(id, key, ctx) { for (const s of sels(id, key)) { const r = $$(s, ctx); if (r.length) return r; } return []; }
+  function $r(id, key, ctx) { for (const s of sels(id, key)) { const r = $(s, ctx); if (r) return r; } return null; }
+  function closestR(el, id, key) { if (!el) return null; for (const s of sels(id, key)) { try { const r = el.closest(s); if (r) return r; } catch (e) { /* skip */ } } return null; }
+  function matchesR(el, id, key) { return sels(id, key).some((s) => { try { return el.matches(s); } catch (e) { return false; } }); }
+  // Called by the content script with the rules from storage (or null for the built-in ones).
+  function configure(rules) { RULES = rules && rules.adapters ? rules : null; }
+  function rulesVersion() { return RULES ? RULES.version : root.PG_Selectors.BUILTIN.version; }
 
   // ---------------- Gmail ----------------
   const gmail = {
     id: 'gmail', label: 'Gmail',
     match: () => location.hostname === 'mail.google.com',
-    rows: () => $$('tr.zA').map((row) => {
-      const s = $('span[email]', row);
+    rows: () => $$r('gmail', 'row').map((row) => {
+      const s = $r('gmail', 'rowSender', row);
       return { row, senderName: s ? (s.getAttribute('name') || text(s)) : '', senderEmail: s ? s.getAttribute('email') : '',
-        subject: text($('.bog', row)), snippet: text($('.y2', row)) };
+        subject: text($r('gmail', 'rowSubject', row)), snippet: text($r('gmail', 'rowSnippet', row)) };
     }),
-    opened: () => $$('div.a3s').filter((b) => b.offsetParent !== null && text(b).length > 0 && !isCompose(b)).map((body) => {
-      const msg = body.closest('.adn, .gs') || body.parentElement;
-      const s = msg ? $('span.gD[email], span[email].gD, h3 span[email]', msg) : null;
-      return { body, anchor: body, scope: msg, senderName: s ? (s.getAttribute('name') || text(s)) : '', senderEmail: s ? s.getAttribute('email') : '',
-        subject: text($('h2.hP')), messageId: gmailMessageId(msg), attachments: gmailAttachments(msg, body), images: imagesIn(body, $('.aQH', msg)) };
+    opened: () => $$r('gmail', 'body').filter((b) => b.offsetParent !== null && text(b).length > 0 && !isCompose(b)).map((body) => {
+      const msg = closestR(body, 'gmail', 'message') || body.parentElement;
+      const s = msg ? $r('gmail', 'sender', msg) : null;
+      const subjectEl = $r('gmail', 'subject');
+      return { body, anchor: body, scope: msg, senderEl: s, subjectEl, senderName: s ? (s.getAttribute('name') || text(s)) : '', senderEmail: s ? s.getAttribute('email') : '',
+        subject: text(subjectEl), messageId: gmailMessageId(msg), attachments: gmailAttachments(msg, body), images: imagesIn(body, $r('gmail', 'attachmentArea', msg)),
+        thread: gmailThread(msg) };
     }),
     // Raw headers via Gmail's own "Show original" page (same site, the user's own session). Never leaves the device.
     fetchHeaders: async (m) => {
@@ -128,9 +149,24 @@
       messageShown: /\/[A-Za-z0-9]{16,}$/.test(location.hash) }),
     reportHelp: 'In Gmail, click the three dots (⋮) at the top-right of the email and choose "Report phishing".',
   };
+  // Who wrote the *other* messages in this conversation (expanded or collapsed), minus the user's own address.
+  // Used to notice a reply that suddenly comes from a different, or look-alike, company.
+  function gmailThread(msg) {
+    if (!msg) return null;
+    const threadRoot = closestR(msg, 'gmail', 'threadRoot');
+    if (!threadRoot) return null;
+    const own = ((document.title.match(EMAIL_RE) || [''])[0] || '').toLowerCase();
+    const senders = new Set();
+    for (const e of $$r('gmail', 'threadSender', threadRoot)) {
+      if (msg.contains(e)) continue;
+      const a = (e.getAttribute('email') || '').toLowerCase();
+      if (a && a !== own) senders.add(a);
+    }
+    return senders.size ? { senders: [...senders].slice(0, 20) } : null;
+  }
   function gmailMessageId(msg) {
     if (!msg) return '';
-    const el = msg.matches('[data-message-id], [data-legacy-message-id]') ? msg : $('[data-message-id], [data-legacy-message-id]', msg);
+    const el = matchesR(msg, 'gmail', 'messageId') ? msg : $r('gmail', 'messageId', msg);
     if (!el) return '';
     const id = el.getAttribute('data-message-id') || '';
     if (/msg-f:\d+/.test(id)) return id.match(/msg-f:\d+/)[0];
@@ -150,11 +186,11 @@
   function gmailAttachments(msg, body) {
     if (!msg) return [];
     const out = new Map();
-    for (const e of $$('[download_url]', msg)) { // "mime/type:file name.ext:https://mail.google.com/..."
+    for (const e of $$r('gmail', 'attachmentDownload', msg)) { // "mime/type:file name.ext:https://mail.google.com/..."
       const m = (e.getAttribute('download_url') || '').match(/^([^:]*):(.+?):(https:\/\/.+)$/);
       if (m) out.set(m[2], { name: m[2], mime: m[1], url: m[3] });
     }
-    for (const e of $$('.aV3, .aQA span[title]', msg)) {
+    for (const e of $$r('gmail', 'attachmentName', msg)) {
       const name = (e.getAttribute('title') || text(e)).trim();
       if (name && !out.has(name)) out.set(name, { name });
     }
@@ -166,24 +202,25 @@
   const yahoo = {
     id: 'yahoo', label: 'Yahoo Mail',
     match: () => /(^|\.)mail\.yahoo\.com$/.test(location.hostname),
-    rows: () => $$('[data-test-id="message-list-item"]').map((row) => {
-      const s = $('[data-test-id="senders"] [title], [data-test-id="senders"]', row);
+    rows: () => $$r('yahoo', 'row').map((row) => {
+      const s = $r('yahoo', 'rowSender', row);
       const title = s ? (s.getAttribute('title') || '') : '';
       return { row, senderName: text(s), senderEmail: (title.match(EMAIL_RE) || [''])[0],
-        subject: text($('[data-test-id="message-subject"]', row)), snippet: text($('[data-test-id="snippet"]', row)) };
+        subject: text($r('yahoo', 'rowSubject', row)), snippet: text($r('yahoo', 'rowSnippet', row)) };
     }),
-    opened: () => $$('[data-test-id="message-view-body-content"]').filter((b) => !isCompose(b)).map((body) => {
-      const msg = body.closest('[data-test-id="message-view"]') || body.closest('article') || body.parentElement.parentElement;
-      const from = $('[data-test-id="message-from"]', msg) || $('[data-test-id="email-pill"]', msg);
+    opened: () => $$r('yahoo', 'body').filter((b) => !isCompose(b)).map((body) => {
+      const msg = closestR(body, 'yahoo', 'message') || body.parentElement.parentElement;
+      const from = $r('yahoo', 'sender', msg);
       let sender = { name: '', email: '' };
       if (from) {
         const t = (from.getAttribute('title') || '') + ' ' + text(from);
-        sender = { name: text($('[data-test-id="email-pill-name"]', from)) || text(from).replace(EMAIL_RE, '').trim(), email: (t.match(EMAIL_RE) || [''])[0] };
+        sender = { name: text($r('yahoo', 'senderName', from)) || text(from).replace(EMAIL_RE, '').trim(), email: (t.match(EMAIL_RE) || [''])[0] };
       }
       if (!sender.email) sender = findSender(msg, body);
-      return { body, anchor: body, scope: msg, senderName: sender.name, senderEmail: sender.email,
-        subject: text($('[data-test-id="message-group-subject-text"]')),
-        attachments: genericAttachments(msg, body), images: imagesIn(body, $('[data-test-id*="attachment" i]', msg)) };
+      const subjectEl = $r('yahoo', 'subject');
+      return { body, anchor: body, scope: msg, senderEl: from || sender.el || null, subjectEl, senderName: sender.name, senderEmail: sender.email,
+        subject: text(subjectEl),
+        attachments: genericAttachments(msg, body), images: imagesIn(body, $r('yahoo', 'attachmentArea', msg)) };
     }),
     health: () => ({ listShown: /\/folders\//.test(location.pathname) && !/\/messages\//.test(location.pathname) && pageShowsList(),
       messageShown: /\/messages\/[^/]+/.test(location.pathname) }),
@@ -191,36 +228,34 @@
   };
 
   // ---------------- Outlook + any other webmail (generic, ARIA-based) ----------------
-  const ROW_SEL = '[role="listbox"] [role="option"], [role="grid"] [role="row"], [role="table"] [role="row"], [data-pg-row], .email-row, .message-list-item';
-  const BODY_SEL = '[aria-label="Message body"], [aria-label*="message body" i], [role="document"], [data-pg-body], [class*="message-body" i], [class*="email-body" i], [class*="mail-body" i], [class*="messagebody" i]';
-
+  // `this.id` lets Outlook use its own updated rules while falling back to the generic ones.
   const generic = {
     id: 'generic', label: 'Web mail',
     match: () => true,
-    rows: () => {
-      const rows = $$(ROW_SEL).filter((r) => !r.closest('[data-pg-ui]'));
+    rows() {
+      const rows = $$r(this.id, 'row').filter((r) => !r.closest('[data-pg-ui]'));
       return rows.map((row) => {
         const t = text(row);
         if (t.length < 5 || t.length > 1200) return null;
         const s = findSender(row);
-        const subjEl = $('[class*="subject" i], [data-subject]', row);
+        const subjEl = $r(this.id, 'rowSubject', row);
         return { row, senderName: s.name || (t.split('\n')[0] || '').slice(0, 80), senderEmail: s.email,
           subject: text(subjEl), snippet: subjEl ? t.replace(text(subjEl), '') : t };
       }).filter(Boolean);
     },
-    opened: () => {
+    opened() {
       // Compose editors are dropped first, so a wrapper around one never becomes the "innermost" body.
-      const bodies = $$(BODY_SEL).filter((b) => !b.closest('[data-pg-ui]') && b.offsetParent !== null && text(b).length > 20 && !isCompose(b));
+      const bodies = $$r(this.id, 'body').filter((b) => !b.closest('[data-pg-ui]') && b.offsetParent !== null && text(b).length > 20 && !isCompose(b));
       // Keep innermost bodies only (avoid analysing a wrapper and its child twice)
       const inner = bodies.filter((b) => !bodies.some((o) => o !== b && b.contains(o)));
       return inner.map((body) => {
         let scope = body.parentElement, sender = { name: '', email: '' };
         for (let i = 0; i < 6 && scope && !sender.email; i++, scope = scope.parentElement) sender = findSender(scope, body);
-        const heading = $('[role="main"] [role="heading"], [class*="subject" i], h1, h2', body.closest('[role="main"]') || document);
+        const heading = $r(this.id, 'subject', body.closest('[role="main"]') || document);
         let msg = body;
         for (let i = 0; i < 4 && msg.parentElement && !msg.parentElement.matches('[role="main"], body'); i++) msg = msg.parentElement;
-        return { body, anchor: body, scope: msg, senderName: sender.name, senderEmail: sender.email, subject: text(heading),
-          attachments: genericAttachments(msg, body), images: imagesIn(body) };
+        return { body, anchor: body, scope: msg, senderEl: sender.el || null, subjectEl: heading, senderName: sender.name, senderEmail: sender.email,
+          subject: text(heading), attachments: genericAttachments(msg, body), images: imagesIn(body) };
       });
     },
     reportHelp: 'Use your email provider\'s "Report phishing" or "Report junk" option (often under the three dots ⋯ menu). In Outlook: Report → Report phishing.',
@@ -245,5 +280,5 @@
   }
 
   // Hosts the extension is installed for by default (manifest content_scripts). Other sites are opt-in per site.
-  root.PG_Providers = { pickAdapter, looksLikeWebmail, linksIn, hasForm, text, isCompose, KNOWN_HOSTS };
+  root.PG_Providers = { pickAdapter, looksLikeWebmail, linksIn, hasForm, text, isCompose, configure, rulesVersion, KNOWN_HOSTS };
 })(typeof globalThis !== 'undefined' ? globalThis : this);

@@ -127,6 +127,19 @@
     ],
   };
 
+  // Requests to send money somewhere new: the core of invoice and supplier fraud ("business email compromise").
+  const PAYMENT_CHANGE = [
+    'new (?:bank(?:ing)?|payment|remittance|wire) (?:details|account|information|instructions)',
+    '(?:changed|updated|amended|different|new) (?:our |my )?(?:bank(?:ing)?|payment|remittance|wire|account) (?:details|account|information|instructions)',
+    '(?:bank(?:ing)?|account|payment|remittance) (?:details|information|instructions) (?:have|has) (?:been |now )?(?:changed|updated|amended)',
+    'we (?:have|\'ve) (?:changed|switched|moved) (?:our )?banks?',
+    '(?:please )?(?:update|amend|change) (?:our|the|your records with our) (?:bank(?:ing)?|payment|account|remittance) (?:details|information)',
+    '(?:pay|remit|send|transfer|wire) (?:the |all |this |future |any |outstanding )?(?:payments?|invoices?|funds|amount|balance) (?:in)?to (?:the|our|this) (?:new|following|below|updated|attached) (?:bank )?account',
+    '(?:old|previous|usual|former) (?:bank )?account (?:is|has been|was) (?:closed|frozen|suspended|blocked|under (?:audit|review))',
+    'do not (?:pay|send|transfer) (?:in)?to (?:the |our )?(?:old|previous|usual) account',
+    'account (?:is )?(?:currently )?(?:under|being) (?:audit|review|maintenance)',
+  ];
+
   const RISKY_ATTACHMENT = /\b[\w\- ]{1,60}\.(exe|scr|js|jse|vbs|vbe|bat|cmd|com|pif|msi|iso|img|hta|wsf|lnk|jar|ps1|docm|xlsm|pptm|html?|shtml)\b/i;
 
   // Tiny built-in list for demos & tests. The real list is downloaded from OpenPhish by the background worker
@@ -135,5 +148,5 @@
     'secure-chase-alerts.com', 'amaz0n-billing.com', 'netflix-payment-update.top'];
 
   root.PG_DATA = { BRANDS, SERVICE_WORDS, PHISH_DOMAIN_WORDS, FREE_MAIL, SUSPICIOUS_TLDS, SHORTENERS,
-    TRACKING_DOMAINS, MULTI_SUFFIXES, PHRASES, RISKY_ATTACHMENT, BUILTIN_BLOCKLIST };
+    TRACKING_DOMAINS, MULTI_SUFFIXES, PHRASES, PAYMENT_CHANGE, RISKY_ATTACHMENT, BUILTIN_BLOCKLIST };
 })(typeof globalThis !== 'undefined' ? globalThis : this);

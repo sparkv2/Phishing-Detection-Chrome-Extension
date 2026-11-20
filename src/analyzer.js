@@ -122,8 +122,11 @@
     return u;
   }
 
-  function sig(id, category, weight, title, explain, evidence) {
-    return { id, category, weight, title, explain, evidence: evidence || '' };
+  // target: where the banner's "Show me" button points in the email ({ type: 'sender'|'link'|'text'|'attachment'|'image'|'form'|'subject', ... })
+  function sig(id, category, weight, title, explain, evidence, target) {
+    const s = { id, category, weight, title, explain, evidence: evidence || '' };
+    if (target) s.target = target;
+    return s;
   }
 
   // ---------- URL analysis ----------
@@ -483,21 +486,164 @@
     return null;
   }
 
+  // ---------- bank details & payment changes ----------
+  // Account numbers in the text, validated by their checksums so ordinary numbers aren't mistaken for them.
+  function ibanValid(iban) {
+    const s = iban.slice(4) + iban.slice(0, 4);
+    let rem = 0;
+    for (const ch of s) {
+      const v = /[0-9]/.test(ch) ? ch : String(ch.charCodeAt(0) - 55);
+      for (const d of v) rem = (rem * 10 + Number(d)) % 97;
+    }
+    return rem === 1;
+  }
+  function abaValid(n) {
+    const d = n.split('').map(Number);
+    return (3 * (d[0] + d[3] + d[6]) + 7 * (d[1] + d[4] + d[7]) + (d[2] + d[5] + d[8])) % 10 === 0 && !/^0{9}$/.test(n);
+  }
+  // Returns [{ type: 'iban'|'routing'|'sortcode'|'account', id: normalized, raw: text as written }]
+  function findBankDetails(text) {
+    const t = text || '';
+    const out = [], seen = new Set();
+    const add = (type, id, raw) => { if (!seen.has(type + id)) { seen.add(type + id); out.push({ type, id, raw: raw.trim() }); } };
+    for (const m of t.matchAll(/\b([A-Z]{2}\d{2}(?:[ ]?[A-Z0-9]{4}){2,7}(?:[ ]?[A-Z0-9]{1,4})?)\b/g)) {
+      const id = m[1].replace(/\s+/g, '');
+      if (id.length >= 15 && id.length <= 34 && ibanValid(id)) add('iban', id, m[1]);
+    }
+    for (const m of t.matchAll(/(?:routing|aba|ach|transit)[^0-9\n]{0,25}(\d{9})\b/gi)) if (abaValid(m[1])) add('routing', m[1], m[1]);
+    for (const m of t.matchAll(/sort[\s-]*code[^0-9\n]{0,15}(\d{2})[\s-]?(\d{2})[\s-]?(\d{2})\b/gi)) add('sortcode', m[1] + m[2] + m[3], m[0].slice(m[0].search(/\d/)));
+    for (const m of t.matchAll(/(?:account|acct|a\/c)\s*(?:number|no\.?|num|#)?\s*[:#]?\s*(\d[\d -]{5,20}\d)\b/gi)) {
+      const id = m[1].replace(/[\s-]/g, '');
+      if (id.length >= 6 && id.length <= 17 && !seen.has('routing' + id)) add('account', id, m[1]);
+    }
+    return out.slice(0, 10);
+  }
+  const PAYCHANGE_RE = D.PAYMENT_CHANGE.map((p) => new RegExp('\\b' + p, 'i'));
+  function paymentChangeSignals(text, banks, history) {
+    const t = (text || '').replace(/\s+/g, ' ');
+    const phrases = uniq(PAYCHANGE_RE.map((re) => (t.match(re) || [])[0]).filter(Boolean).map((x) => x.trim()));
+    const out = [];
+    const bankTarget = { type: 'text', phrases: banks.map((b) => b.raw) };
+    if (history && history.bankChanged) {
+      out.push(sig('bank-details-changed', 'payment', 40, 'Bank details differ from this sender\'s usual ones',
+        `Earlier emails from ${history.bankChangedDomain || 'this sender'} gave different bank details. Criminals who break into, or imitate, a supplier's email send "new" account numbers so the next payment goes to them.`,
+        banks.map((b) => b.raw).join(', '), bankTarget));
+    }
+    if (phrases.length) {
+      out.push(sig('payment-change', 'payment', banks.length ? 35 : 28, 'Asks you to send money to a new account',
+        'The email says payment details have changed. This is the most expensive email scam: the email often looks completely normal, sometimes even comes from the real company\'s hacked mailbox, and the money is gone once sent.',
+        phrases.slice(0, 2).map((x) => `"${x}"`).join(', '), { type: 'text', phrases: [...phrases, ...banks.map((b) => b.raw)] }));
+    } else if (banks.length && history && history.mature && !history.seenBefore) {
+      out.push(sig('bank-details-new-sender', 'payment', 15, 'First email from this sender, and it includes bank details',
+        'Before paying an account number from someone who has never emailed you, confirm it with them by phone using a number you find yourself.',
+        banks.map((b) => b.raw).join(', '), bankTarget));
+    }
+    return { signals: out, phrases, banks };
+  }
+
+  // ---------- reply-chain hijack & lookalike correspondents ----------
+  // Candidate originals for a lookalike: one character removed, swapped, changed or added, look-alike letters
+  // undone, or the same name under a different ending (.com/.co/...). The content script hashes these and checks
+  // them against the hashed history of who you correspond with, so no address book is ever stored in plain text.
+  const VARIANT_CHARS = 'abcdefghijklmnopqrstuvwxyz0123456789-';
+  const COMMON_TLDS = ['com', 'net', 'org', 'co', 'io', 'us', 'biz', 'info', 'co.uk', 'com.au', 'ca', 'de', 'fr', 'nl', 'eu'];
+  function editVariants(label) {
+    const out = new Set();
+    for (let i = 0; i < label.length; i++) out.add(label.slice(0, i) + label.slice(i + 1));
+    for (let i = 0; i < label.length - 1; i++) out.add(label.slice(0, i) + label[i + 1] + label[i] + label.slice(i + 2));
+    for (let i = 0; i <= label.length; i++) for (const c of VARIANT_CHARS) {
+      out.add(label.slice(0, i) + c + label.slice(i));
+      if (i < label.length) out.add(label.slice(0, i) + c + label.slice(i + 1));
+    }
+    out.add(normalizeHomoglyphs(label));
+    out.add(label.replace(/m/g, 'rn')); out.add(label.replace(/w/g, 'vv'));
+    out.delete(label); out.delete('');
+    return out;
+  }
+  function lookalikeCandidates(email) {
+    email = lc(email);
+    const [local, domain] = email.split('@');
+    if (!domain) return { domains: [], addresses: [] };
+    const reg = registrableDomain(domain);
+    const label = domainLabel(reg), suffix = reg.slice(label.length + 1);
+    const domains = new Set();
+    if (!D.FREE_MAIL.includes(reg) && label.length >= 3 && label.length <= 40) {
+      for (const v of editVariants(label)) if (/^[a-z0-9]/.test(v) && v.length >= 2) domains.add(v + '.' + suffix);
+      for (const t of COMMON_TLDS) domains.add(label + '.' + t);
+      domains.delete(reg);
+    }
+    // Free-mail lookalikes copy the person instead: john.smith@gmail.com -> johnsmith@ or john.smlth@gmail.com
+    const addresses = new Set();
+    if (D.FREE_MAIL.includes(reg) && local && local.length <= 40) {
+      for (const v of editVariants(local)) if (v) addresses.add(v + '@' + domain);
+      addresses.add(local.replace(/\./g, '') + '@' + domain);
+      addresses.delete(email);
+    }
+    return { domains: [...domains], addresses: [...addresses] };
+  }
+  // Is domain `a` a near-copy of domain `b`? (Used for thread participants, whose domains are on the page.)
+  function looksLike(a, b) {
+    if (!a || !b || a === b) return false;
+    const la = domainLabel(a), lb = domainLabel(b);
+    if (la === lb) return true; // same name, different ending: acme.com vs acme.co
+    if (normalizeHomoglyphs(la) === normalizeHomoglyphs(lb)) return true;
+    return lb.length >= 4 && levenshtein(la, lb) === 1;
+  }
+  const REPLY_RE = /^\s*(re|aw|sv|antw|r|rif|ynt|odp|vs)\s*(\[\d+\])?\s*:/i;
+
+  // thread: { senders: [emails of the other messages in this conversation] }, from the webmail page.
+  function threadSignals(thread, sender, risky) {
+    const out = [];
+    if (!thread || !sender.email || !(thread.senders || []).length) return out;
+    const others = uniq(thread.senders.map(lc).filter((e) => e && e !== sender.email));
+    const otherRegs = uniq(others.map((e) => registrableDomain(e.split('@').pop())));
+    const reg = registrableDomain(sender.domain);
+    if (!others.length || otherRegs.includes(reg) || others.includes(sender.email)) return out;
+    const copied = otherRegs.find((d) => looksLike(reg, d));
+    const target = { type: 'sender' };
+    if (copied) {
+      out.push(sig('thread-lookalike', 'sender', 45, 'Reply comes from a copy of the other side\'s address',
+        `Earlier messages in this conversation came from ${copied}. This reply comes from ${reg}, which is made to look the same. Criminals who have been reading a conversation slip in a reply from a look-alike address, usually to change where a payment goes.`,
+        `${copied} → ${reg}`, target));
+    } else {
+      out.push(sig('thread-new-sender', 'sender', risky ? 30 : 10, 'A new company joined this conversation',
+        `Earlier messages here came from ${otherRegs.slice(0, 2).join(', ')}, but this one comes from ${reg}.` +
+        (risky ? ' It also asks for money or details: check with the people you were talking to, using contact details you already have.' : ' That can be normal, but check before acting on any request.'),
+        `${otherRegs[0]} → ${reg}`, target));
+    }
+    return out;
+  }
+
   // ---------- sender history ----------
-  // history: { seenBefore, mature, nameKnownElsewhere } computed on the device from hashed past senders.
-  function historySignals(history, sender, found, trusted) {
+  // history (computed on the device from salted hashes of past senders):
+  //   seenBefore, mature, nameKnownElsewhere,
+  //   lookalikeOf: 'acme.com'            a domain you correspond with, that this sender's domain imitates
+  //   lookalikeAddress: 'j.smith@gmail.com'  an address you correspond with, that this sender imitates
+  //   bankChanged, bankChangedDomain     bank details differ from the ones this domain sent before
+  function historySignals(history, sender, found, trusted, subject, risky) {
     const out = [];
     if (!history || trusted || !sender.email) return out;
+    const target = { type: 'sender' };
+    if (history.lookalikeOf || history.lookalikeAddress) {
+      const real = history.lookalikeOf || history.lookalikeAddress;
+      out.push(sig('lookalike-correspondent', 'sender', risky ? 45 : 38, 'Imitates someone you email with',
+        `You normally get emails from ${real}. This one comes from ${history.lookalikeOf ? sender.domain : sender.email}, a near-copy. Scammers register look-alike addresses of real suppliers and colleagues, then send invoices or payment changes.`,
+        `${real} → ${history.lookalikeOf ? sender.domain : sender.email}`, target));
+    }
     if (history.nameKnownElsewhere) {
       out.push(sig('new-address-for-name', 'sender', 30, 'Familiar name, new address',
         `You've had emails from "${sender.name}" before, but always from a different address. This one comes from ${sender.email}. Scammers copy the names of bosses, colleagues and suppliers to ask for money or details.`,
-        `${sender.name} <${sender.email}>`));
+        `${sender.name} <${sender.email}>`, target));
     }
-    if (history.mature && !history.seenBefore) {
-      const sensitive = !!(found.credentials || found.financial || found.secrecy);
+    if (history.mature && !history.seenBefore && !history.knownDomain && REPLY_RE.test(subject || '')) {
+      out.push(sig('fake-reply', 'sender', risky ? 20 : 12, 'Pretends to be a reply',
+        `The subject starts with "${(subject.match(REPLY_RE) || [''])[0].trim()}" as if you'd been talking, but you've never had an email from ${sender.email}. Faking a conversation makes a scam feel familiar.`,
+        subject.slice(0, 60), { type: 'subject' }));
+    } else if (history.mature && !history.seenBefore) {
+      const sensitive = !!(found.credentials || found.financial || found.secrecy || risky);
       out.push(sig('first-time-sender', 'sender', sensitive ? 15 : 4, 'First email from this sender',
         sensitive ? `This is the first email you've had from ${sender.email}, and it already asks for money, details or secrecy. Check who they are another way before replying.`
-          : `This is the first email you've had from ${sender.email}.`, sender.email));
+          : `This is the first email you've had from ${sender.email}.`, sender.email, target));
     }
     return out;
   }
@@ -566,7 +712,14 @@
 
     const content = analyzeContent(input.subject, input.body);
     let contentSignals = content.signals;
-    senderSignals.push(...historySignals(input.history, sender, content.found, trusted));
+    // Payment changes: wording, bank numbers, and whether this sender's bank details changed since last time.
+    const banks = findBankDetails((input.subject || '') + '\n' + (input.body || ''));
+    const pay = paymentChangeSignals((input.subject || '') + ' ' + (input.body || ''), banks, input.history);
+    // A changed account from a trusted sender still counts: their mailbox may have been broken into.
+    const paySignals = trusted ? pay.signals.filter((x) => x.id === 'bank-details-changed') : pay.signals;
+    const moneyAsk = !!(pay.phrases.length || content.found.financial || content.found.credentials || banks.length);
+    senderSignals.push(...historySignals(input.history, sender, content.found, trusted, input.subject, moneyAsk));
+    if (!trusted) senderSignals.push(...threadSignals(input.thread, sender, moneyAsk));
     const attachmentSignals = input.attachments && input.attachments.length ? analyzeAttachments(input.attachments, input.body)
       : [mentionedAttachment(input.body)].filter(Boolean);
     const aiSigs = trusted ? [] : aiSignals(input.ai, content.found);
@@ -576,7 +729,7 @@
     for (const q of (input.qrCodes || [])) {
       const data = (q.data || '').trim();
       if (!/^https?:\/\//i.test(data) && !/^[a-z0-9.\-]+\.[a-z]{2,}\//i.test(data)) continue;
-      qrLinks.push({ href: /^https?:/i.test(data) ? data : 'https://' + data, text: '', qr: true });
+      qrLinks.push({ href: /^https?:/i.test(data) ? data : 'https://' + data, text: '', qr: true, src: q.src });
     }
 
     // Links: judge each unique destination, keep the most serious ones.
@@ -589,6 +742,7 @@
       res.signals.unshift(sig('qr-code', 'link', 15, 'QR code hides a link',
         `An image in this email is a QR code that opens "${res.host}". Scanning it with your phone skips the link checks your computer does, which is why scammers use them.`, res.host));
       res.weight += 15;
+      for (const x of res.signals) x.target = { type: 'image', src: r.src || '' }; // "Show me" points at the QR image
       linkResults.push(Object.assign(res, { text: 'QR code' }));
     }
     for (const l of (input.links || [])) {
@@ -603,11 +757,13 @@
     const seenLinkSig = new Set();
     for (const r of riskyLinks) for (const x of r.signals) {
       const k = x.id + '|' + r.regDomain;
-      if (seenLinkSig.has(k)) continue; seenLinkSig.add(k); linkSignals.push(x);
+      if (seenLinkSig.has(k)) continue; seenLinkSig.add(k);
+      if (!x.target) x.target = { type: 'link', host: r.host, href: r.href };
+      linkSignals.push(x);
     }
 
     if (input.hasForm) linkSignals.push(sig('form', 'link', 30, 'Email contains a sign-in form',
-      'This email has boxes for you to type information directly into it. Real companies never ask you to log in inside an email.', 'form in email'));
+      'This email has boxes for you to type information directly into it. Real companies never ask you to log in inside an email.', 'form in email', { type: 'form' }));
 
     // Brand mentioned in text while asking for credentials/payment, but neither sender nor links belong to that brand.
     if ((content.found.credentials || content.found.financial) && !s.ctx.verifiedBrand && !trusted) {
@@ -617,7 +773,8 @@
         const linksToBrand = linkResults.some((r) => domainMatches(r.host, b.domains));
         if (!linksToBrand && !(sender.domain && domainMatches(sender.domain, b.domains)) && !senderSignals.some((x) => x.title.includes(b.name))) {
           contentSignals.push(sig('brand-impersonation', 'sender', 20, `Pretends to be from ${b.name}`,
-            `The message talks about your ${b.name} account and asks for information, but it was not sent by ${b.name} and its links don't go to ${b.name}.`, b.name));
+            `The message talks about your ${b.name} account and asks for information, but it was not sent by ${b.name} and its links don't go to ${b.name}.`, b.name,
+            { type: 'text', phrases: b.keywords.filter((k) => k.length >= 4) }));
         }
         break;
       }
@@ -625,9 +782,11 @@
 
     // Combination bonus: pressure + a sensitive request is the classic phishing recipe.
     const coercion = !!(content.found.urgency || content.found.fear || content.found.secrecy);
-    const ask = !!(content.found.credentials || content.found.financial);
+    const ask = !!(content.found.credentials || content.found.financial || pay.phrases.length);
     if (coercion && ask) contentSignals.push(sig('combo-pressure-ask', 'combo', 12, 'Pressure combined with a request for information',
-      'This email both rushes or scares you AND asks for sensitive information or money — the classic phishing formula.', ''));
+      'This email both rushes or scares you AND asks for sensitive information or money — the classic phishing formula.', '',
+      { type: 'text', phrases: [...(content.found.urgency || []), ...(content.found.fear || []), ...(content.found.secrecy || []),
+        ...(content.found.credentials || []), ...(content.found.financial || []), ...pay.phrases] }));
 
     // ----- scoring -----
     let contentPenalty = contentSignals.reduce((a, x) => a + x.weight, 0);
@@ -646,13 +805,17 @@
     const attWeights = attachmentSignals.map((x) => x.weight).sort((a, b) => b - a);
     const attachmentPenalty = Math.min(60, (attWeights[0] || 0) + attWeights.slice(1).reduce((a, w) => a + w * 0.25, 0));
     const aiPenalty = Math.min(32, aiSigs.reduce((a, x) => a + x.weight, 0));
+    // Payment changes have their own bucket: they are the costliest scam, and their wording is often perfectly calm.
+    const paymentPenalty = Math.min(55, paySignals.reduce((a, x) => a + x.weight, 0));
 
     // Technical red flags combined with a coercive request strengthen each other.
     let comboTech = 0;
     if ((senderPenalty >= 30 || linkPenalty >= 30 || attachmentPenalty >= 30) && (ask || coercion)) comboTech = 15;
+    // A look-alike or hijacked sender asking to change where money goes is the textbook invoice-fraud pattern.
+    if (paymentPenalty && senderSignals.some((x) => /lookalike|thread-|new-address-for-name|auth-fail/.test(x.id))) comboTech = Math.max(comboTech, 20);
 
     const known = senderSignals.some((x) => x.category === 'known') || linkResults.some((r) => r.known);
-    let score = Math.round(100 - contentPenalty - senderPenalty - linkPenalty - attachmentPenalty - aiPenalty - comboTech);
+    let score = Math.round(100 - contentPenalty - senderPenalty - linkPenalty - attachmentPenalty - aiPenalty - paymentPenalty - comboTech);
     // 0 is reserved for confirmed phishing; unconfirmed emails bottom out at 10 however many warning signs they have.
     score = known ? 0 : Math.max(10, Math.min(100, score));
 
@@ -663,10 +826,22 @@
     else if (score < 70) level = 'suspicious';
     const high = !known && score < 35;
 
-    const signals = [...senderSignals, ...linkSignals, ...attachmentSignals, ...contentSignals, ...aiSigs].sort((a, b) => b.weight - a.weight);
+    const signals = [...senderSignals, ...linkSignals, ...attachmentSignals, ...paySignals, ...contentSignals, ...aiSigs].sort((a, b) => b.weight - a.weight);
+    // Every reason gets a "Show me" target unless it already has one.
+    for (const x of signals) {
+      if (x.target) continue;
+      if (x.category === 'attachment') x.target = { type: 'attachment', name: x.evidence };
+      else if (CATEGORY_INFO[x.category]) x.target = { type: 'text', phrases: content.found[x.category] || [] };
+      else if (x.category === 'sender' || /sender/.test(x.id)) x.target = { type: 'sender' };
+    }
     const bodyText = input.body || '';
     let asks = input.context === 'open' ? detectAsks(bodyText, input.links, content.found) : [];
+    if (pay.phrases.length && input.context === 'open') asks.unshift('Send money to a new or different bank account');
     if (input.ai && input.context === 'open') asks = uniq([...asks, ...(input.ai.asks || []).map((a) => AI_ASK_TEXT[a]).filter(Boolean)]);
+    // Advice specific to what was found, shown first under "What you should do".
+    const tips = [];
+    if (paySignals.length) tips.push('Before paying, call the company on a phone number you already have (an old invoice, their website). Never use a number or reply address from this email.');
+    if (signals.some((x) => /^thread-|lookalike-correspondent/.test(x.id))) tips.push('Compare the sender\'s address letter by letter with earlier emails in your inbox.');
     return {
       score, level, high, known, trusted, signals,
       threatCategory: known ? ((signals.find((x) => x.category === 'known') || {}).threatCategory || 'phishing') : null,
@@ -677,6 +852,8 @@
       links: linkResults,
       riskyLinks,
       attachments: (input.attachments || []).map((a) => a.name),
+      banks: banks.map((b) => ({ type: b.type, id: b.id })), // the content script fingerprints these per sender (on device)
+      tips,
       asks,
       summary: input.context === 'open' ? ((input.ai && input.ai.summary) || summarize(input.subject, bodyText)) : '',
       aiSummary: !!(input.ai && input.ai.summary && input.context === 'open'),
@@ -684,5 +861,5 @@
   }
 
   root.PG_Analyzer = { analyzeEmail, analyzeUrl, analyzeLink, analyzeAttachments, registrableDomain, lookalikeBrand, unwrapUrl, summarize,
-    parseSender, parseAuthResults, authVerdict, isIP, brandOfDomain };
+    parseSender, parseAuthResults, authVerdict, isIP, brandOfDomain, findBankDetails, lookalikeCandidates, looksLike };
 })(typeof globalThis !== 'undefined' ? globalThis : this);

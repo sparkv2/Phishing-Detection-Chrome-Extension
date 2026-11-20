@@ -1,0 +1,43 @@
+{
+ "format": 1,
+ "version": 1,
+ "minExtension": "1.4.0",
+ "note": "CSS selectors the webmail adapters use. Edit this file to fix detection after a webmail layout change: GitHub Actions signs it and every Tripwire picks it up within hours, without a new extension version. Keep src/selectors.js in sync (the tests check).",
+ "adapters": {
+  "gmail": {
+   "row": "tr.zA",
+   "rowSender": "span[email]",
+   "rowSubject": ".bog",
+   "rowSnippet": ".y2",
+   "body": "div.a3s",
+   "message": ".adn, .gs",
+   "sender": "span.gD[email], span[email].gD, h3 span[email]",
+   "subject": "h2.hP",
+   "attachmentArea": ".aQH",
+   "attachmentDownload": "[download_url]",
+   "attachmentName": ".aV3, .aQA span[title]",
+   "threadRoot": "[role=\"list\"], .nH.if",
+   "threadSender": "span.gD[email], span.zF[email], span.yP[email], h3 span[email]",
+   "messageId": "[data-message-id], [data-legacy-message-id]"
+  },
+  "yahoo": {
+   "row": "[data-test-id=\"message-list-item\"]",
+   "rowSender": "[data-test-id=\"senders\"] [title], [data-test-id=\"senders\"]",
+   "rowSubject": "[data-test-id=\"message-subject\"]",
+   "rowSnippet": "[data-test-id=\"snippet\"]",
+   "body": "[data-test-id=\"message-view-body-content\"]",
+   "message": "[data-test-id=\"message-view\"], article",
+   "sender": "[data-test-id=\"message-from\"], [data-test-id=\"email-pill\"]",
+   "senderName": "[data-test-id=\"email-pill-name\"]",
+   "subject": "[data-test-id=\"message-group-subject-text\"]",
+   "attachmentArea": "[data-test-id*=\"attachment\" i]"
+  },
+  "generic": {
+   "row": "[role=\"listbox\"] [role=\"option\"], [role=\"grid\"] [role=\"row\"], [role=\"table\"] [role=\"row\"], [data-pg-row], .email-row, .message-list-item",
+   "rowSubject": "[class*=\"subject\" i], [data-subject]",
+   "body": "[aria-label=\"Message body\"], [aria-label*=\"message body\" i], [role=\"document\"], [data-pg-body], [class*=\"message-body\" i], [class*=\"email-body\" i], [class*=\"mail-body\" i], [class*=\"messagebody\" i]",
+   "subject": "[role=\"main\"] [role=\"heading\"], [class*=\"subject\" i], h1, h2"
+  },
+  "outlook": {}
+ }
+}
