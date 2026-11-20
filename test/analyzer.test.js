@@ -72,6 +72,12 @@ test('AI summary replaces the extractive summary and AI asks are merged', () => 
   assert.ok(r.asks.includes('Make a payment or share payment details'));
 });
 
+test('attachment names reversed with an invisible right-to-left character are caught', () => {
+  const sigs = A.analyzeAttachments([{ name: 'invoice‮fdp.exe' }, { name: 'report‎.pdf' }], '');
+  assert.ok(sigs.some((s) => s.id === 'attachment-rtlo'), sigs.map((s) => s.id).join());
+  assert.ok(!sigs.some((s) => s.evidence.includes('report')), 'a harmless invisible mark on a real PDF must not be flagged');
+});
+
 // ---------- payment changes & reply-chain hijack ----------
 test('bank details: valid IBAN / routing / sort code found, invalid numbers ignored', () => {
   const found = A.findBankDetails('IBAN GB82 WEST 1234 5698 7654 32, bad IBAN GB00 WEST 1234 5698 7654 32, ' +

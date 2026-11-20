@@ -1,6 +1,17 @@
-// Main content script: scans inbox rows and opened emails, highlights, shows banner, guards link clicks.
+// =====================================================================================================================
+// Content script (content.js): runs inside the webmail page
+//
+// Ties everything together on the page:
+//   - colours inbox rows (scanRows) and draws the banner above each opened email (scanOpened)
+//   - asks the background worker for threat-list lookups, QR decoding, short-link expansion and the AI check
+//   - remembers past senders as salted hashes (sender history) for first-time / look-alike / bank-change checks
+//   - intercepts clicks on risky links and shows the warning dialog (guardLinks)
+//   - "Show me" highlighting, the user's report / trust buttons, counters and the layout health check
+// A MutationObserver re-scans whenever the page changes, since webmail apps redraw constantly.
+//
 // Privacy: email text is analysed in memory only. Stored on the device: counts, the user's own trust/report lists,
-// salted hashes of past senders (for "first email from this sender"), and which kinds of warning signs were seen.
+// salted hashes of past senders, and which kinds of warning signs were seen (ids only).
+// =====================================================================================================================
 (function () {
   'use strict';
   if (window.__tripwireLoaded) return; // injected twice (manifest + "Check emails on this site")
@@ -9,22 +20,26 @@
   const A = window.PG_Analyzer, P = window.PG_Providers, UI = window.PG_UI, D = window.PG_DATA;
   const HOST = location.host || 'local-file';
 
+  // ---------- state (all in memory, for this page only) ----------
   const state = { enabled: true, aiEnabled: false, trusted: new Set(), blocked: new Set(), enabledHosts: [], disabledHosts: [], active: false };
-  // Threat-list answers from the background worker: host or 'url:'+key -> hit object, or null if clean. Memory only.
-  const threats = new Map();
-  const expanded = new Map(); // shortened link -> where it really goes (memory only)
-  const verdicts = new Map(); // in-memory only: rowKey -> {level, score, known}
-  const extras = new Map(); // in-memory only: message key -> { auth, attHtml, qr, ai, started:Set }
-  const seenKeys = new Set();
+  const threats = new Map();  // threat-list answers: host or 'url:'+key -> hit, or null if clean
+  const expanded = new Map(); // shortened link -> where it really goes
+  const verdicts = new Map(); // email key -> { level, score, known, high, top } (so rows and banners agree)
+  const extras = new Map();   // email key -> results of the slow checks: { auth, attHtml, qr, ai, hist, started }
+  const seenKeys = new Set(); // emails already counted in the stats
   const pendingStats = { scanned: 0, suspicious: 0, phishing: 0, warnings: 0 };
   let adapter = null, observer = null, scanTimer = null;
 
   const lc = (s) => (s || '').toString().toLowerCase().trim();
+  // Identifies one email across inbox row and opened view: sender + subject.
   const keyOf = (email, name, subject) => (lc(email) || lc(name)) + '|' + lc(subject).replace(/\s+/g, ' ').slice(0, 200);
   const lists = () => ({ trusted: state.trusted, blocked: state.blocked, threats, expanded });
-  const send = async (msg) => { try { return await chrome.runtime.sendMessage(msg); } catch (e) { return null; } }; // null while the extension reloads
+  // Message the background worker. Returns null instead of throwing while the extension is being reloaded.
+  const send = async (msg) => { try { return await chrome.runtime.sendMessage(msg); } catch (e) { return null; } };
 
-  // Ask the background worker which hosts / URLs are on the threat lists (answers are cached for this page).
+  // ---------- threat lookups ----------
+  // Ask the background worker which hosts / URLs are on the threat lists. Only new ones are asked about; answers
+  // (including "clean") are cached in `threats` for as long as the page is open.
   async function lookupThreats(hosts, urlKeys) {
     const needHosts = [...new Set(hosts.filter((h) => h && !threats.has(h)))];
     const needUrls = [...new Set(urlKeys.filter((u) => u && !threats.has('url:' + u)))];
@@ -36,6 +51,7 @@
     for (const u of needUrls) threats.set('url:' + u, hits['url:' + u] || null);
   }
   const senderDomain = (email) => (lc(email).split('@')[1] || '');
+  // The hosts and exact-URL keys to look up for a set of links (after unwrapping redirects and expanded short links).
   function linkTargets(links) {
     const hosts = [], urls = [];
     for (const l of links) {
@@ -47,6 +63,7 @@
     return { hosts, urls };
   }
 
+  // ---------- settings ----------
   async function loadState() {
     const s = await chrome.storage.local.get(['enabled', 'aiEnabled', 'trusted', 'blocked', 'enabledHosts', 'disabledHosts', 'layoutRules']);
     state.enabled = s.enabled !== false;
@@ -58,6 +75,7 @@
     P.configure(s.layoutRules || null); // updated webmail layout rules (signature-checked by the background worker), or built-in
   }
 
+  // Run here? Not if switched off; yes on known webmail, sites the user enabled, and the local demo inbox.
   function shouldRun() {
     if (!state.enabled || state.disabledHosts.includes(HOST)) return false;
     adapter = P.pickAdapter();
@@ -65,31 +83,44 @@
   }
 
   // ---------- sender history (hashed, on this device) ----------
-  // Remembers which senders have emailed before, and which addresses a display name normally uses, as salted
-  // SHA-256 hashes. Nothing readable is stored: the list can't be turned back into names or addresses.
-  const history = { data: null, dirty: false, timer: null, cache: new Map() };
+  // Remembers which senders, company domains and display names have emailed before, and the bank details known
+  // senders used, as salted SHA-256 hashes. Nothing readable is stored: it can't be turned back into names or
+  // addresses. Stored shape (chrome.storage.local "senderHistory"):
+  //   { salt, since, senders: { hash: { d: lastDay, m: [message hashes], b: [bank hashes] } },
+  //     domains: { hash: { d, m, b } }, names: { hash: { d, s: [{ s: sender hash, d: domain hash }] } } }
+  const history = { data: null, loading: null, dirty: false, timer: null, cache: new Map(),
+    tabId: Math.random().toString(36).slice(2) }; // marks our own saves, to tell them apart from other tabs'
   const DAY = 86400000;
-  async function loadHistory() {
-    if (history.data) return history.data;
-    const s = await chrome.storage.local.get(['senderHistory']);
-    let h = s.senderHistory;
-    if (!h || !h.salt) {
-      const salt = [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.toString(16).padStart(2, '0')).join('');
-      h = { v: 1, salt, since: Date.now(), senders: {}, names: {} };
-      history.dirty = true;
+  const HASH_CACHE_MAX = 5000;
+  // Loaded once; concurrent callers share the same promise, so a fresh install creates exactly one salt.
+  function loadHistory() {
+    if (history.data) return Promise.resolve(history.data);
+    if (!history.loading) {
+      history.loading = chrome.storage.local.get(['senderHistory']).then((s) => {
+        let h = s.senderHistory;
+        if (!h || !h.salt) {
+          const salt = [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.toString(16).padStart(2, '0')).join('');
+          h = { v: 1, salt, since: Date.now(), senders: {}, names: {} };
+          history.dirty = true;
+        }
+        history.data = h;
+        return h;
+      });
     }
-    history.data = h;
-    return h;
+    return history.loading;
   }
+  // Salted SHA-256 of a value, first 16 hex characters. Cached, since the same senders come up again and again.
   async function hash(value) {
     if (history.cache.has(value)) return history.cache.get(value);
     const h = await loadHistory();
     const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(h.salt + '|' + value));
     const hex = [...new Uint8Array(buf).slice(0, 8)].map((b) => b.toString(16).padStart(2, '0')).join('');
+    if (history.cache.size >= HASH_CACHE_MAX) history.cache.clear(); // keep memory bounded on long-open tabs
     history.cache.set(value, hex);
     return hex;
   }
-  function personName(name) { // "Mark Davis (CEO)" -> "mark davis"; null for names that aren't a person's
+  // "Mark Davis (CEO)" -> "mark davis"; null for names that aren't a person's ("Support Team", one-word names).
+  function personName(name) {
     const n = lc(name).replace(/\(.*?\)|\[.*?\]|\bvia\b.*$/g, ' ').replace(/[^a-zÀ-ɏ\s'-]/g, ' ').replace(/\s+/g, ' ').trim();
     const tokens = n.split(' ').filter((t) => t.length >= 2);
     if (tokens.length < 2 || tokens.length > 4 || name.includes('@')) return null;
@@ -101,8 +132,11 @@
     const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(history.data.salt + '|' + value));
     return [...new Uint8Array(buf).slice(0, 8)].map((b) => b.toString(16).padStart(2, '0')).join('');
   }
+  // How many *other* emails (not this one) a history record has seen.
   const otherMessages = (rec, mk) => (rec ? rec.m.filter((k) => k !== mk).length : 0);
 
+  // Looks this sender up in the history, then records this email. Returns what the analyzer's historySignals needs:
+  //   { seenBefore, mature, nameKnownElsewhere, knownDomain, lookalikeOf, lookalikeAddress, bankChanged, ... }
   // opts.deep: also look for look-alikes of people you correspond with (opened emails only, it hashes ~1,000 candidates).
   // opts.banks: bank identifiers found in this email ([{type, id}]), compared with the ones this sender used before.
   async function historyFor(senderName, senderEmail, msgKey, opts) {
@@ -124,6 +158,7 @@
     if (nh && !seenBefore && h.names[nh]) {
       nameKnownElsewhere = h.names[nh].s.some((o) => o.s !== sh && o.d !== dh && h.senders[o.s] && h.senders[o.s].m.length >= 2);
     }
+    // "First email from this sender" is meaningless until the history has had time to learn who you correspond with.
     const mature = Date.now() - h.since > 14 * DAY || Object.keys(h.senders).length >= 150;
 
     // Look-alike of a domain (or, for free mail, an address) you've had at least 2 emails from.
@@ -171,6 +206,8 @@
     saveHistorySoon();
     return { seenBefore, mature, nameKnownElsewhere, knownDomain, lookalikeOf, lookalikeAddress, bankChanged, bankChangedDomain: bankChanged ? reg : null };
   }
+  // Saves the history a few seconds after the last change (many rows change at once), pruning the oldest entries
+  // so storage stays bounded.
   function saveHistorySoon() {
     if (!history.dirty) return;
     clearTimeout(history.timer);
@@ -183,11 +220,14 @@
       const doms = Object.keys(h.domains || {});
       if (doms.length > 3000) doms.sort((a, b) => h.domains[a].d - h.domains[b].d).slice(0, doms.length - 3000).forEach((k) => delete h.domains[k]);
       history.dirty = false;
+      h.savedBy = history.tabId;
       try { await chrome.storage.local.set({ senderHistory: h }); } catch (e) { /* extension reloaded */ }
     }, 3000);
   }
 
   // ---------- inbox list ----------
+  // Rows only show sender, subject and a snippet, so their verdict is a quick first pass; opening the email runs the
+  // full analysis and updates the row's colour through `verdicts`.
   function classify(row, level) {
     row.classList.remove('pg-row-suspicious', 'pg-row-phishing');
     if (level === 'suspicious') row.classList.add('pg-row-suspicious');
@@ -209,10 +249,11 @@
       if (!res) {
         const hist = await historyFor(r.senderName, r.senderEmail, key);
         const a = A.analyzeEmail({ senderName: r.senderName, senderEmail: r.senderEmail, subject: r.subject, body: r.snippet, links: [], context: 'list', history: hist }, lists());
-        res = { level: a.level, score: a.score, known: a.known, high: a.high, top: a.signals.slice(0, 2).map((x) => x.title), partial: true, hist };
+        res = { level: a.level, score: a.score, known: a.known, high: a.high, top: a.signals.slice(0, 2).map((x) => x.title) };
         verdicts.set(key, res);
         count(key, res.level);
       }
+      // Remember what we drew, so an unchanged row is skipped next scan. The hover title summarises the warning.
       r.row.dataset.pgKey = key;
       r.row.dataset.pgLevel = res.level;
       classify(r.row, res.level);
@@ -225,7 +266,8 @@
   }
 
   // ---------- opened email ----------
-  // Slow checks (headers, attachments, QR codes, AI) run in the background; the banner is redrawn as each one finishes.
+  // Slow checks (headers, attachments, QR codes, AI) run in the background; the banner is drawn straight away and
+  // redrawn as each one finishes. Each check runs at most once per email (`started`), and its result goes in `extras`.
   function enrich(key, m, bodyText) {
     const ex = extras.get(key) || { started: new Set() };
     extras.set(key, ex);
@@ -235,6 +277,7 @@
       ex.started.add(name);
       Promise.resolve().then(fn).then((changed) => { if (changed) redraw(); }).catch((e) => console.debug('[Tripwire]', name, e));
     };
+    // Sender authentication (SPF/DKIM/DMARC) from the message's raw headers (Gmail only).
     if (adapter.fetchHeaders && m.messageId) {
       once('auth', async () => {
         const raw = await adapter.fetchHeaders(m);
@@ -242,6 +285,7 @@
         return !!ex.auth;
       });
     }
+    // HTML attachments: read them as text (never render them) and look for login forms and hidden redirects.
     const htmlAtts = (m.attachments || []).filter((a) => a.url && /\.(html?|shtml|xhtml|svg)$/i.test(a.name));
     if (adapter.fetchAttachment && htmlAtts.length) {
       once('attachments', async () => {
@@ -259,6 +303,7 @@
         return Object.keys(ex.attHtml).length > 0;
       });
     }
+    // QR codes in images: the background worker decodes them; any web address found is then looked up like a link.
     if (m.images && m.images.length) {
       once('qr', async () => {
         const srcs = [], original = new Map(); // what the background fetches -> the image's real src on the page
@@ -279,6 +324,7 @@
         return true;
       });
     }
+    // Optional on-device AI check (only if the user turned it on).
     if (state.aiEnabled && bodyText.length > 40) {
       once('ai', async () => {
         ex.ai = await send({ type: 'pg-ai', payload: { subject: m.subject, sender: `${m.senderName || ''} <${m.senderEmail || ''}>`, body: bodyText } });
@@ -288,6 +334,7 @@
     return ex;
   }
 
+  // For every opened email: look up its links, run the full analysis, draw the banner above it, guard its links.
   async function scanOpened() {
     const opened = adapter.opened();
     for (const m of opened) {
@@ -295,6 +342,7 @@
       const bodyText = P.text(body);
       const key = keyOf(m.senderEmail, m.senderName, m.subject);
       const ex = extras.get(key) || {};
+      // A fingerprint of what the banner was drawn from. Unchanged email + same finished checks = nothing to redraw.
       const sig = bodyText.length + '|' + (m.senderEmail || '') + '|' + m.subject + '|' + ['auth', 'attHtml', 'qr', 'ai'].map((k) => (ex[k] ? 1 : 0)).join('');
       const hasBanner = () => body.previousElementSibling && body.previousElementSibling.classList && body.previousElementSibling.classList.contains('pg-banner-host');
       if (body.dataset.pgSig === sig && hasBanner()) continue;
@@ -315,10 +363,11 @@
       if (hasBanner()) body.previousElementSibling.remove();
       body.dataset.pgSig = sig;
 
-      verdicts.set(key, { level: result.level, score: result.score, known: result.known, high: result.high, top: result.signals.slice(0, 2).map((x) => x.title), hist });
+      verdicts.set(key, { level: result.level, score: result.score, known: result.known, high: result.high, top: result.signals.slice(0, 2).map((x) => x.title) });
       count(key, result.level);
       countSignals(key, result.signals);
 
+      // Checks still running are listed in the banner ("Still checking: ...").
       const pending = [...(e.started || [])].filter((n) => ({ auth: !('auth' in e), attachments: !e.attHtml, qr: !e.qr, ai: !('ai' in e) })[n]);
       const banner = UI.renderBanner(result, {
         reportHelp: adapter.reportHelp,
@@ -342,6 +391,8 @@
     document.querySelectorAll('.pg-show').forEach((el) => el.classList.remove('pg-show'));
     try { if (window.CSS && CSS.highlights) CSS.highlights.delete('tripwire-show'); } catch (e) { /* unsupported */ }
   }
+  // Text ranges where any of `phrases` appears (case-insensitive, any whitespace), skipping Tripwire's own UI.
+  // A phrase split across two page elements isn't found; that's rare for the short phrases used here.
   function textRanges(roots, phrases) {
     const res = [...new Set((phrases || []).filter((p) => p && p.trim().length >= 2))]
       .map((p) => new RegExp(p.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+'), 'gi'));
@@ -362,6 +413,8 @@
     return ranges;
   }
   function hostOf(href) { const u = A.unwrapUrl(expanded.get((href || '').trim()) || href); return u && u.hostname !== 'invalid.local' ? lc(u.hostname) : ''; }
+  // Finds what signal `s` is about (see its `target`), outlines or highlights it and scrolls to it.
+  // Returns how many things were marked (0 = nothing visible, so the button says so).
   function showMe(m, links, result, s) {
     const t = s.target || {};
     clearShow(); clearTimeout(showTimer);
@@ -387,6 +440,8 @@
     return els.length + ranges.length;
   }
 
+  // ---------- link protection ----------
+  // The analysis of one link element (matched by href and text), plus the email's overall level.
   function linkInfoFor(anchor, links, result) {
     const href = anchor.getAttribute('href') || '';
     const r = result.links.find((x) => x.href === href.trim() && x.text === (P.text(anchor) || anchor.getAttribute('title') || '').trim())
@@ -406,11 +461,18 @@
     return Object.assign({}, info, judged, { emailLevel: info.emailLevel, hops: r.hops });
   }
 
+  // Opens a link in a new tab. Risky ones are opened by the background worker, which remembers the tab so the
+  // optional page guard can warn harder if that page asks for a password.
   function openLink(url, risky, level) {
     if (risky) send({ type: 'pg-open-risky', url, level }).then((r) => { if (!r) window.open(url, '_blank', 'noopener,noreferrer'); });
     else window.open(url, '_blank', 'noopener,noreferrer');
   }
 
+  // Marks risky links, shows where a link really goes on hover, and intercepts clicks:
+  //   risky link                       -> warning dialog first (short links are expanded inside the dialog)
+  //   short link in a harmless email   -> expanded silently; opens normally unless it leads somewhere risky
+  //   anything else                    -> left alone
+  // Listeners are attached once per email body; later scans only refresh the data they read (body._pgGuard).
   function guardLinks(body, links, result) {
     // Mark risky links visibly
     for (const l of links) {
@@ -451,7 +513,8 @@
     }, true);
   }
 
-  // ---------- user actions ----------
+  // ---------- user actions (banner buttons) ----------
+  // Adds or removes a value in a stored list ('trusted' or 'blocked').
   async function updateList(name, value, add) {
     if (!value) return;
     const s = await chrome.storage.local.get([name]);
@@ -459,6 +522,7 @@
     add ? set.add(lc(value)) : set.delete(lc(value));
     await chrome.storage.local.set({ [name]: [...set] }); // storage.onChanged triggers a rescan
   }
+  // "Report phishing": block the sender on this device, untrust them, and (if opted in) share a fingerprint.
   async function report(sender, verifiedBrand) {
     if (!sender.email) return;
     const dom = sender.domain;
@@ -474,6 +538,7 @@
   }
 
   // ---------- stats (counts only) ----------
+  // Counts each email once per page, and saves in batches (flushStatsSoon) rather than on every scan.
   function count(key, level) {
     if (seenKeys.has(key)) return;
     seenKeys.add(key);
@@ -508,6 +573,8 @@
   // ---------- health check ----------
   // If a known webmail page clearly shows an inbox (or an open email) but the adapter finds nothing for a while,
   // the site's layout probably changed. Tell the user (toolbar badge + popup) instead of failing silently.
+  // A problem must persist for 3 scans over at least 8 seconds before it is reported, so a page still loading
+  // doesn't raise a false alarm. Each state change (broken / ok) is reported once.
   const health = { strikes: 0, firstStrike: 0, reported: null };
   function checkHealth(rowCount, openCount) {
     if (!adapter.health) return;
@@ -536,8 +603,10 @@
     scanning = false;
     if (rescan) { rescan = false; scheduleScan(); }
   }
+  // Page changes come in bursts; wait for a short quiet moment before scanning.
   function scheduleScan() { clearTimeout(scanTimer); scanTimer = setTimeout(scan, 350); }
 
+  // Removes everything Tripwire drew (used when settings change, and when protection is switched off).
   function resetAll() {
     verdicts.clear();
     document.querySelectorAll('.pg-banner-host').forEach((b) => b.remove());
@@ -550,6 +619,7 @@
   function start() {
     if (state.active) return;
     state.active = true;
+    // Re-scan whenever the page changes, except for changes inside Tripwire's own banner and dialogs.
     observer = new MutationObserver((muts) => {
       if (muts.every((m) => m.target.closest && m.target.closest('[data-pg-ui]'))) return;
       scheduleScan();
@@ -563,16 +633,30 @@
     resetAll();
   }
 
+  // Storage keys whose changes don't affect what this page shows (counters, background bookkeeping, and settings
+  // that only the popup or background worker use).
+  const IGNORED_KEYS = ['stats', 'signalCounts', 'senderHistory', 'health', 'intelNewest', 'layoutRulesChecked',
+    'useFeed', 'expandLinks', 'shareReports', 'communityEnabled', 'guardEnabled', 'pwAlert'];
+
+  // React to changes from the popup, other tabs and the background worker.
   chrome.storage.onChanged.addListener(async (changes, area) => {
     if (area !== 'local') return;
     const keys = Object.keys(changes);
-    if (keys.every((k) => ['stats', 'signalCounts', 'senderHistory', 'health', 'intelNewest', 'layoutRulesChecked'].includes(k))) return;
+    // Another tab saved the sender history: take its copy (unless we have unsaved changes of our own), so two open
+    // mail tabs don't keep overwriting each other's newly recorded senders.
+    const other = changes.senderHistory && changes.senderHistory.newValue;
+    if (other && other.savedBy !== history.tabId && !history.dirty) {
+      if (!history.data || history.data.salt !== other.salt) history.cache.clear(); // cached hashes depend on the salt
+      history.data = other;
+    }
+    if (keys.every((k) => IGNORED_KEYS.includes(k))) return;
     if (keys.includes('intelUpdated')) threats.clear(); // threat lists were refreshed: re-check everything
     await loadState();
     resetAll();
     if (shouldRun()) { start(); scan(); } else stop();
   });
 
+  // The popup asks each tab whether Tripwire is active there.
   chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
     if (msg && msg.type === 'pg-status') {
       reply({ active: state.active, provider: adapter ? adapter.label : '', known: adapter ? adapter.id !== 'generic' : false, host: HOST, rules: P.rulesVersion() });

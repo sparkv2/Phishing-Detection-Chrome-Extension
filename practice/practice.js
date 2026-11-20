@@ -13,12 +13,14 @@
   };
   const shuffle = (a) => { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
 
+  // Runs the real analyzer on a lesson's made-up email (with its simulated headers, history, thread...).
   function judge(lesson) {
     const x = lesson.extra || {};
     const input = Object.assign({ context: 'open' }, lesson.email, { auth: x.auth, attachments: x.attachments, qrCodes: x.qrCodes, history: x.history, thread: x.thread });
     return A.analyzeEmail(input, { expanded: new Map(x.expanded || []) });
   }
 
+  // Draws the email like a mail client would. Hovering a link or the QR code reveals where it really goes.
   function mailView(lesson) {
     const e = lesson.email, x = lesson.extra || {};
     const body = h('div', { class: 'bd' }, h('p', {}, e.body));
@@ -36,6 +38,7 @@
     return h('div', { class: 'mail' }, h('div', { class: 'hd' }, h('div', { class: 'subj' }, e.subject), h('div', { class: 'from' }, `${e.senderName} <${e.senderEmail}>`)), body);
   }
 
+  // Orders the lessons (tricks you've received first, the rest shuffled) and steps through them one at a time.
   async function start() {
     let counts = {};
     try { counts = (await chrome.storage.local.get(['signalCounts'])).signalCounts || {}; } catch (e) { /* opened outside the extension */ }
@@ -44,6 +47,8 @@
     const ordered = lessons.filter((x) => x.yours).sort((a, b) => b.yours - a.yours).concat(shuffle(lessons.filter((x) => !x.yours)));
     let i = 0, score = 0;
 
+    // One lesson: the email, then "What is the biggest red flag?". The right answer is the analyzer's top reason (or
+    // "Nothing" for a genuine email); the wrong ones are harmless details. Answering explains the trick.
     function show() {
       app.textContent = '';
       if (i >= ordered.length) {

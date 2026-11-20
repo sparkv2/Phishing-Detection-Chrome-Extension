@@ -49,7 +49,9 @@
     },
   };
 
-  const MAX_LEN = 600;
+  const MAX_LEN = 600; // a real selector is far shorter; anything longer is refused
+
+  // Compares "1.4.0"-style versions: negative if a < b, 0 if equal, positive if a > b.
   const cmpVersion = (a, b) => {
     const pa = String(a || '0').split('.').map(Number), pb = String(b || '0').split('.').map(Number);
     for (let i = 0; i < 3; i++) { if ((pa[i] || 0) !== (pb[i] || 0)) return (pa[i] || 0) - (pb[i] || 0); }
@@ -68,13 +70,16 @@
 
   // The selectors to try for adapter `id`, key `key`: the updated rule first (if any and valid), then the built-in.
   // `isValid(selector)` checks that a selector parses; unknown adapters/keys and non-strings are ignored.
+  // Order of preference for Outlook (which has few rules of its own): updated Outlook rule, updated generic rule,
+  // built-in Outlook rule, built-in generic rule. For every other adapter: updated rule, then built-in rule.
   function candidates(remote, id, key, isValid) {
     const out = [];
-    const r = remote && remote.adapters && remote.adapters[id];
+    const ra = (remote && remote.adapters) || {};
+    // Accept a selector only if it is a non-empty, reasonably short string that parses, and isn't a duplicate.
     const add = (s) => { if (typeof s === 'string' && s.length <= MAX_LEN && s.trim() && (!isValid || isValid(s)) && !out.includes(s)) out.push(s); };
-    const known = BUILTIN.adapters[id] && (key in BUILTIN.adapters[id] || (id === 'outlook' && key in BUILTIN.adapters.generic));
-    if (r && known) add(r[key]);
-    if (id === 'outlook' && remote && remote.adapters && remote.adapters.generic) add(remote.adapters.generic[key]);
+    const knownKey = (adapter) => !!BUILTIN.adapters[adapter] && key in BUILTIN.adapters[adapter]; // ignore keys we don't use
+    if (ra[id] && (knownKey(id) || (id === 'outlook' && knownKey('generic')))) add(ra[id][key]);
+    if (id === 'outlook' && ra.generic && knownKey('generic')) add(ra.generic[key]);
     add((BUILTIN.adapters[id] || {})[key]);
     if (id === 'outlook') add(BUILTIN.adapters.generic[key]);
     return out;

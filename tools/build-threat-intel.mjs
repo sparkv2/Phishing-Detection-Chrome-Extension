@@ -55,12 +55,13 @@ const allEntries = [], sources = [];
 for (const s of I.SOURCES) {
   const data = parsedById[s.id];
   if (!data) continue;
+  // Description index for (this source, label), stored in one byte. Once all 255 are used, new labels fall back to
+  // an existing description of the same source (the entry is kept, only its label is dropped).
   const descFor = (label) => {
     const k = s.id + '|' + (label || '');
-    if (!descKeys.has(k)) {
-      if (descs.length >= 255) return descFor(''); // description byte is full: drop the label, keep the entry
-      descKeys.set(k, descs.length); descs.push({ cat: s.category, source: s.name, sourceId: s.id, label: label || '' });
-    }
+    if (descKeys.has(k)) return descKeys.get(k);
+    if (descs.length >= 255) { const same = descs.findIndex((d) => d.sourceId === s.id); return same >= 0 ? same : 0; }
+    descKeys.set(k, descs.length); descs.push({ cat: s.category, source: s.name, sourceId: s.id, label: label || '' });
     return descKeys.get(k);
   };
   const { entries, count, skipped } = I.sourceEntries(data, descFor, extra);

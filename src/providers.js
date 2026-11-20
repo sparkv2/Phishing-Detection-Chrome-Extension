@@ -1,27 +1,44 @@
-// Adapters that know how to find inbox rows and opened emails on different webmail sites.
-// Each adapter returns plain data; the analyzer never touches the page.
+// =====================================================================================================================
+// Webmail adapters (providers.js)
+//
+// The only code that knows what Gmail, Yahoo and Outlook pages look like. Each adapter reads the page and returns
+// plain data for the content script: inbox rows ({ row, senderName, senderEmail, subject, snippet }) and opened
+// emails ({ body, senderName, senderEmail, subject, attachments, images, thread, ... }). The analyzer never touches
+// the page itself.
+//
+// Site-specific CSS selectors are not written here: they come from the layout rules (selectors.js), which can be
+// updated without a new extension version when a site redesigns. Sections:
+//   1. page helpers         links, forms, compose boxes, images, attachment names, finding the sender
+//   2. layout rules         $r / $$r / closestR: look things up through the rules, with fallback
+//   3. adapters             Gmail, Yahoo, Outlook + a generic one for any other webmail
+//   4. choosing an adapter  pickAdapter / looksLikeWebmail
+// =====================================================================================================================
 (function (root) {
   'use strict';
   const EMAIL_RE = /[a-z0-9._%+\-]+@[a-z0-9.\-\u00a1-\uffff]+\.[a-z\u00a1-\uffff]{2,}/i;
   const text = (el) => (el ? (el.innerText || el.textContent || '').trim() : '');
+  // querySelector wrappers that return nothing (instead of throwing) for a selector the browser rejects.
   const $ = (sel, ctx) => { try { return (ctx || document).querySelector(sel); } catch (e) { return null; } };
   const $$ = (sel, ctx) => { try { return [...(ctx || document).querySelectorAll(sel)]; } catch (e) { return []; } };
 
+  // ---------- 1. page helpers ----------
+  // Real web links in an email body, with the text the user sees (mail and phone links are left out).
   function linksIn(el) {
     return $$('a[href]', el).map((a) => ({ href: a.getAttribute('href') || '', text: text(a) || a.getAttribute('title') || '', el: a }))
       .filter((l) => l.href && !/^(mailto:|tel:|#)/i.test(l.href));
   }
+  // Does the email itself contain a form or password box? (Real companies never ask you to log in inside an email.)
   function hasForm(el) { return !!$('form input, input[type="password"]', el); }
 
   // Is this element part of an email the user is writing (new message, reply, forward)?
   // Outlook's compose editor is also labelled "Message body", and Gmail's reply box can sit inside a thread,
   // so every adapter skips editable areas: the banner is only for emails being read.
-  const COMPOSE_SEL = '[contenteditable=""], [contenteditable="true"], [contenteditable="plaintext-only"], [g_editable], textarea, ' +
-    '.M9, .AD, [aria-label*="compose" i], [aria-label*="new message" i], [data-test-id*="compose" i]';
+  const EDITABLE_SEL = '[contenteditable=""], [contenteditable="true"], [contenteditable="plaintext-only"], [g_editable], textarea';
+  const COMPOSE_SEL = EDITABLE_SEL + ', .M9, .AD, [aria-label*="compose" i], [aria-label*="new message" i], [data-test-id*="compose" i]';
   function isCompose(el) {
     if (!el) return false;
-    if (el.isContentEditable || el.closest(COMPOSE_SEL)) return true;
-    return !!$('[contenteditable=""], [contenteditable="true"], [contenteditable="plaintext-only"], [g_editable], textarea', el);
+    if (el.isContentEditable || el.closest(COMPOSE_SEL)) return true; // inside an editor or compose window
+    return !!$(EDITABLE_SEL, el); // or wraps one (a container whose "innermost body" would be the editor)
   }
 
   // Images large enough to hold a QR code (tracking pixels and icons are skipped).
@@ -58,7 +75,9 @@
   // Used to notice when a site redesign has silently broken detection.
   function pageShowsList() { return $$('[role="main"] [role="row"], [role="main"] [role="option"], [role="main"] tr').length >= 3; }
 
-  // Find a sender email near an element by checking common attributes, then visible text.
+  // Find the sender near an element: first from attributes webmail apps put on sender names (email=, title=...),
+  // then from visible text like "Jane Doe <jane@example.com>". `excludeEl` (the email body) is skipped, so an
+  // address mentioned inside the email isn't mistaken for the sender. Returns { name, email, el }.
   function findSender(scope, excludeEl) {
     if (!scope) return { name: '', email: '' };
     const attrEl = $$('[email], [data-email], [data-hovercard-id*="@"], [title*="@"], [aria-label*="@"]', scope)
@@ -88,7 +107,7 @@
     return { name: '', email: '' };
   }
 
-  // ---------------- layout rules (src/selectors.js) ----------------
+  // ---------------- 2. layout rules (src/selectors.js) ----------------
   // Every selector below comes from the rules: an updated, signature-checked copy if the background worker has one,
   // otherwise the built-in copy. For each lookup the updated rule is tried first; if it finds nothing, the built-in
   // rule is tried, so a bad update can't make things worse than before.
@@ -99,6 +118,8 @@
     return validity.get(sel);
   }
   const sels = (id, key) => root.PG_Selectors.candidates(RULES, id, key, isValidSelector);
+  // The rule-based versions of querySelectorAll / querySelector / closest / matches. `id` is the adapter
+  // ('gmail', 'yahoo', 'outlook', 'generic') and `key` the rule name ('row', 'body', 'sender'...).
   function $$r(id, key, ctx) { for (const s of sels(id, key)) { const r = $$(s, ctx); if (r.length) return r; } return []; }
   function $r(id, key, ctx) { for (const s of sels(id, key)) { const r = $(s, ctx); if (r) return r; } return null; }
   function closestR(el, id, key) { if (!el) return null; for (const s of sels(id, key)) { try { const r = el.closest(s); if (r) return r; } catch (e) { /* skip */ } } return null; }
@@ -106,6 +127,10 @@
   // Called by the content script with the rules from storage (or null for the built-in ones).
   function configure(rules) { RULES = rules && rules.adapters ? rules : null; }
   function rulesVersion() { return RULES ? RULES.version : root.PG_Selectors.BUILTIN.version; }
+
+  // ---------------- 3. adapters ----------------
+  // Every adapter has: match() is this the site?  rows() inbox rows  opened() opened emails  reportHelp (how to
+  // report phishing on this site). Optional: fetchHeaders / fetchAttachment (Gmail), health() for the layout check.
 
   // ---------------- Gmail ----------------
   const gmail = {
@@ -267,18 +292,20 @@
     reportHelp: 'In Outlook, select the email, then click "Report" in the toolbar and choose "Report phishing".',
   });
 
+  // ---------------- 4. choosing an adapter ----------------
   const ADAPTERS = [gmail, yahoo, outlook];
+  // Webmail sites that use the generic adapter but are known to be email (AOL, Proton, Zoho, Fastmail, iCloud...).
   const KNOWN_HOSTS = /^(mail\.google\.com|mail\.yahoo\.com|.*\.mail\.yahoo\.com|outlook\.(live|office|office365)\.com|outlook\.cloud\.microsoft|mail\.aol\.com|mail\.proton\.me|mail\.zoho\.com|.*\.fastmail\.com|app\.fastmail\.com|mail\.yandex\.\w+|mail\.gmx\.\w+|navigator-\w+\.gmx\.\w+|www\.icloud\.com)$/;
 
   function pickAdapter() { return ADAPTERS.find((a) => a.match()) || generic; }
 
-  // Heuristic for sites we don't know: does this page look like a webmail inbox?
+  // Should the generic adapter run here? Yes on known webmail hosts; elsewhere only if the page calls itself an
+  // inbox and shows a list of messages.
   function looksLikeWebmail() {
     if (KNOWN_HOSTS.test(location.hostname)) return true;
     const t = (document.title + ' ' + text($('nav, [role="navigation"], aside'))).toLowerCase();
     return /\binbox\b/.test(t) && !!$('[role="listbox"] [role="option"], [role="grid"] [role="row"], .email-row, [data-pg-row]');
   }
 
-  // Hosts the extension is installed for by default (manifest content_scripts). Other sites are opt-in per site.
-  root.PG_Providers = { pickAdapter, looksLikeWebmail, linksIn, hasForm, text, isCompose, configure, rulesVersion, KNOWN_HOSTS };
+  root.PG_Providers = { pickAdapter, looksLikeWebmail, linksIn, hasForm, text, isCompose, configure, rulesVersion };
 })(typeof globalThis !== 'undefined' ? globalThis : this);

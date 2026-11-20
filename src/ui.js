@@ -1,8 +1,18 @@
-// On-page UI: summary/score banner, click-warning dialog, and link hover tooltip.
-// Rendered inside Shadow DOM so the email site's styles can't break it (and ours can't break the site).
+// =====================================================================================================================
+// On-page UI (ui.js)
+//
+// Everything Tripwire draws inside the webmail page:
+//   renderBanner   the card above an opened email: verdict, score meter, summary, reasons, advice, buttons
+//   confirmLink    the "Wait, check this link first" dialog shown before a risky link opens
+//   showTooltip    the small "this link really goes to..." label shown on hover
+// Each is rendered inside a Shadow DOM, so the email site's styles can't break it (and ours can't break the site).
+// Text is always added with createTextNode / textContent, never as HTML, so nothing from an email can inject markup.
+// =====================================================================================================================
 (function (root) {
   'use strict';
 
+  // Tiny element builder: h('div', { class: 'x', onclick: fn }, child, 'text', [more children]).
+  // `on*` attributes become event listeners; strings become text nodes (never parsed as HTML).
   function h(tag, attrs, ...children) {
     const el = document.createElement(tag);
     for (const [k, v] of Object.entries(attrs || {})) {
@@ -15,6 +25,7 @@
     return el;
   }
 
+  // Styles shared by all three pieces of UI. Colours come from the level class: --c (accent) and --bg (header tint).
   const CSS = `
   :host { all: initial; }
   * { box-sizing: border-box; }
@@ -94,6 +105,8 @@
     '<line x1="10" y1="64" x2="118" y2="64" stroke="#E24B4A" stroke-width="7" stroke-linecap="round"/>' +
     '<circle cx="10" cy="64" r="8" fill="#E24B4A"/><circle cx="118" cy="64" r="8" fill="#E24B4A"/><circle cx="64" cy="64" r="10" fill="#E24B4A"/></svg>';
 
+  // A host element with an open shadow root holding our styles. `data-pg-ui` lets the content script ignore page
+  // changes inside our own UI (otherwise drawing the banner would trigger another scan).
   function shadowHost(tag) {
     const host = document.createElement(tag || 'div');
     host.setAttribute('data-pg-ui', '');
@@ -102,6 +115,8 @@
     return { host, sr };
   }
 
+  // ---------- banner wording ----------
+  // Headline per verdict. Known threats get a headline per threat type; "very suspicious" (score < 35) its own.
   const LEVEL_TEXT = {
     safe: { icon: '✓', title: 'No warning signs found', sub: 'This email passed our checks. Stay alert anyway.' },
     suspicious: { icon: '!', title: 'Be careful — this email looks suspicious', sub: 'Some warning signs were found. Read the reasons below before you act.' },
@@ -116,6 +131,8 @@
   const HIGH_TEXT = { icon: '!', title: 'Very suspicious — strong signs of phishing',
     sub: 'Not on a known-scam list yet, but it has serious warning signs. Don\'t click links, open attachments, or reply.' };
 
+  // General advice per level ("safe" shows one random good habit). Advice specific to this email (result.tips)
+  // is shown before these.
   const TIPS = {
     phishing: [
       'Don\'t click any links or open any attachments in this email.',
@@ -139,6 +156,10 @@
     ],
   };
 
+  // ---------- the banner ----------
+  // result: the analyzer's verdict. opts: { reportHelp, pending: [checks still running], onReport, onShow, onTrust,
+  // onUntrust } (callbacks from the content script). Returns the host element to insert above the email.
+  // Sections, top to bottom: header (headline + score), meter, Summary, Why (or "What we checked"), advice, buttons.
   function renderBanner(result, opts) {
     const { host, sr } = shadowHost('div');
     host.className = 'pg-banner-host';
@@ -236,7 +257,9 @@
     return host;
   }
 
+  // ---------- the link warning dialog ----------
   // Click warning. Resolves true if the user insists on opening the link.
+  // "Go back to safety" is focused and is the default; Escape and clicking outside also cancel.
   // opts.expand: optional promise for a shortened link, resolving to the judged final destination (or null).
   function confirmLink(info, opts) {
     opts = opts || {};
@@ -281,6 +304,8 @@
     });
   }
 
+  // ---------- the hover tooltip ----------
+  // One tooltip element, created on first use and reused; positioned below the link (or above, near the bottom).
   let tipHost = null, tipEl = null;
   function showTooltip(anchor, info) {
     if (!tipHost) {
