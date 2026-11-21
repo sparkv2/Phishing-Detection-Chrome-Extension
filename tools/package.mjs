@@ -12,6 +12,12 @@ const INCLUDE = ['manifest.json', 'background.js', 'src', 'popup', 'offscreen', 
 const targets = process.argv.slice(2).length ? process.argv.slice(2) : ['chrome', 'edge', 'firefox'];
 const base = JSON.parse(readFileSync(join(root, 'manifest.json'), 'utf8'));
 
+// The Chrome Web Store rejects uploads whose manifest description is over 132 characters. Fail here instead.
+if ([...base.description].length > 132) {
+  console.error(`manifest.json description is ${[...base.description].length} characters; the stores allow at most 132.`);
+  process.exit(1);
+}
+
 // The manifest each store gets. Every store copy drops the file:// match used by the local demo inbox: a published
 // extension has no reason to touch local files, and reviewers ask about it.
 function manifestFor(target) {
