@@ -80,4 +80,4 @@ Store packages leave out the `file:///…demo-inbox.html` match used for local t
 1. **Chrome Web Store:** register a developer account at https://chrome.google.com/webstore/devconsole (one-time US$5 fee, Google account, 2-step verification required). Then *New item* → upload the Chrome zip → fill in this listing, the privacy fields and the images → *Submit for review*. Review usually takes a few days; extensions with broad host permissions can take longer.
 2. **Microsoft Edge Add-ons:** register at https://partner.microsoft.com/dashboard/microsoftedge (free) → *Create new extension* → upload the Edge zip → reuse this listing.
 3. **Firefox:** create an account at https://addons.mozilla.org/developers (free) → *Submit a New Add-on* → *On this site* → upload the Firefox zip.
-4. Publisher contact email and website: use a contact address you're happy to make public (the stores show it), and `https://github.com/sparkv2/Phishing-Detection-Chrome-Extension` as the website.
+4. Publisher contact email: `tripwire@sparkv2.com` (its own Zoho Mail inbox, read at mail.zoho.com). Website: `https://github.com/sparkv2/Phishing-Detection-Chrome-Extension`.
