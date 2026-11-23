@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+### Detection fixes (each of these emails used to pass as safe)
+- **Forged sender passed as verified.** Comments in `Authentication-Results`, such as Gmail's copy of an upstream ARC seal (`arc=pass (… dmarc=pass …)`), were read as real results. A forged PayPal email with `dmarc=fail` could count as a proven PayPal address. Comments are now ignored.
+- **Links behind Proofpoint URL Defense** (`urldefense.com` v1/v2/v3) were never checked, because every link looked like a harmless urldefense link. They're now unwrapped. LinkedIn `/redir/redirect`, YouTube `/redirect` and `l.instagram.com` links are unwrapped as well.
+- **Phishing on Google Sites, Docs and Forms.** `google.com` was on the tracking-service list, so "link says paypal.com but goes to sites.google.com" was never flagged.
+- **Curly apostrophes and invisible characters** (`I’m in a meeting`, `You’ve won`, `pass​word`) stopped the wording checks from matching.
+- **Look-alike links in international characters** (`xn--pple-43d.com`, shown as "аpple.com") are now recognised as fake Apple sites, not just "unusual characters".
+- **UPS, IRS, DHL and AWS** were skipped in "pretends to be from" checks because the names are only 3 letters. They now count when written in capitals.
+- **Display names** "Microsoft Outlook", "Apple iCloud" and names with Cyrillic look-alike letters ("PаyPal") now count as brand claims.
+- **QR codes** holding a bare domain (`evil.example`, no `https://` or path) are now checked.
+- **Attachments:** OneNote (`.one`), Excel add-ins (`.xll`), `.iqy`, `.slk`, `.appref-ms`, `.library-ms`, `.search-ms` and similar delivery formats are now flagged as programs.
+- 22 regression tests added (`test/cases.js`).
+
 ## 1.2.0 (2026-11-18)
 
 ### Detection

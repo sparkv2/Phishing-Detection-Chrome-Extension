@@ -87,6 +87,36 @@
       ai: { risk: 'high', asks: ['credentials', 'click_link'], reasons: ['Threatens to block the account and asks for a password.'] } }, 'suspicious'],
   ];
 
+  // ---------- regressions (1.2.1): each of these used to pass as "safe" ----------
+  const RB = { senderName: 'Service', senderEmail: 'notice@mailer-x.example', subject: 'Account notice', body: 'Please review your account.' };
+  EMAILS.push(
+    ['Zero-width characters hiding trigger words', Object.assign({}, RB, { body: 'Ver​ify your acc​ount now. Your account will be clo​sed. Enter your pass​word.', links: [] }), 'suspicious'],
+    ['Google Sites page, link text says paypal.com', Object.assign({}, RB, { links: [{ href: 'https://sites.google.com/view/pp-secure-review', text: 'www.paypal.com/review' }] }), 'suspicious'],
+    ['Proofpoint v3 link to a lookalike', Object.assign({}, RB, { links: [{ href: 'https://urldefense.com/v3/__https://paypa1-login.example/review__;!!abc$', text: 'Review' }] }), 'suspicious'],
+    ['Proofpoint v2 link to a lookalike', Object.assign({}, RB, { links: [{ href: 'https://urldefense.proofpoint.com/v2/url?u=https-3A__paypa1-2Dlogin.example_review&d=DwMF&c=x', text: 'Review' }] }), 'suspicious'],
+    ['LinkedIn open redirect to a lookalike', Object.assign({}, RB, { links: [{ href: 'https://www.linkedin.com/redir/redirect?url=https%3A%2F%2Fpaypa1-login.example', text: 'www.paypal.com' }] }), 'suspicious'],
+    ['IDN link (Cyrillic a in apple.com)', Object.assign({}, RB, { links: [{ href: 'https://аpple.com/id', text: 'Open' }] }), 'suspicious'],
+    ['QR code with a bare lookalike domain', Object.assign({}, RB, { qrCodes: [{ data: 'micros0ft-login.example' }], links: [] }), 'suspicious'],
+    ['IRS refund scam (3-letter brand)', { senderName: 'Refunds', senderEmail: 'refunds@gov-refunds.example', subject: 'IRS tax refund', body: 'The IRS has a tax refund for you. Claim your refund by entering your card number.', links: [] }, 'suspicious'],
+    ['OneNote attachment', { senderName: 'Accounts', senderEmail: 'accounts@supplier.example', subject: 'Invoice', body: 'Invoice attached, double click to view.', links: [], attachments: [{ name: 'Invoice_8812.one' }] }, 'suspicious'],
+    ['Excel add-in (.xll) attachment', { senderName: 'Accounts', senderEmail: 'accounts@supplier.example', subject: 'Report', body: 'Report attached.', links: [], attachments: [{ name: 'Q3_report.xll' }] }, 'suspicious'],
+    // false-positive traps for the same fixes
+    ['Proofpoint-wrapped real link', { senderName: 'Sarah Kim', senderEmail: 'sarah@acme.example', subject: 'Notes', body: 'Notes are in the doc.', links: [{ href: 'https://urldefense.com/v3/__https://docs.google.com/document/d/x__;!!abc$', text: 'docs.google.com/document' }] }, 'safe'],
+    ['Google Docs share notification', { senderName: 'Sarah Kim (via Google Docs)', senderEmail: 'drive-shares-dm-noreply@google.com', subject: 'Document shared with you', body: 'Sarah Kim shared a document with you.', links: [{ href: 'https://docs.google.com/document/d/abc/edit', text: 'Open' }] }, 'safe'],
+    ['Coworker mentions UPS, no request', { senderName: 'Rosa Diaz', senderEmail: 'rosa@acme.example', subject: 'Samples', body: 'I’ll send the samples via UPS tomorrow.', links: [] }, 'safe'],
+  );
+
+  // [name, input, signal id that must appear]: smaller signals that used to be missed entirely.
+  const SIGNALS = [
+    ['Curly apostrophe: "You’ve won"', Object.assign({}, RB, { body: 'You’ve won! Reply to receive it.', links: [] }), 'content-prize'],
+    ['Curly apostrophe: "I’m in a meeting"', Object.assign({}, RB, { body: 'I’m in a meeting, reply when you see this.', links: [] }), 'content-secrecy'],
+    ['Display name "Microsoft Outlook"', { senderName: 'Microsoft Outlook', senderEmail: 'noreply@mailbox-quota.example', subject: 'Mailbox full', body: 'Your mailbox is full.', links: [] }, 'brand-mismatch'],
+    ['Display name "Apple iCloud"', { senderName: 'Apple iCloud', senderEmail: 'noreply@storage-full.example', subject: 'Storage full', body: 'Your storage is full.', links: [] }, 'brand-mismatch'],
+    ['Display name with a Cyrillic letter', { senderName: 'PаyPal', senderEmail: 'noreply@acct-notices.example', subject: 'Receipt', body: 'Thanks for your purchase.', links: [] }, 'brand-mismatch'],
+    ['Google Forms page behind "Log in to PayPal"', Object.assign({}, RB, { links: [{ href: 'https://docs.google.com/forms/d/e/abc/viewform', text: 'Log in to PayPal' }] }), 'brand-text-link'],
+    ['UPS link text going elsewhere', Object.assign({}, RB, { links: [{ href: 'https://release-parcel.example/pay', text: 'Pay the UPS fee' }] }), 'brand-text-link'],
+  ];
+
   // [url, expected to have any warning]
   const URLS = [['https://paypal.com.secure-login.ru/x', true], ['https://www.paypal.com/signin', false], ['https://micros0ft.com', true],
     ['https://amazon-billing-update.com', true], ['https://goggle.com', true], ['https://linkedin.com/in/x', false], ['https://zoominfo.com', false],
@@ -117,8 +147,13 @@
       { spf: 'softfail', dmarc: 'fail' }, 'paypal.com', 'fail'],
     ['Authentication-Results: mx.example; dkim=pass header.d=mail.shop.example; spf=neutral\n\n', { dkim: 'pass', dmarc: '' }, 'shop.example', 'pass'],
     ['Subject: no auth header here\n\n', null, 'x.example', 'unknown'],
+    // Comments are ignored: an ARC seal's "(... dmarc=pass ...)" claim must not hide the real dmarc=fail.
+    ['Authentication-Results: mx.google.com;\r\n dkim=neutral (no key) header.i=@evil.example;\r\n arc=pass (i=1 spf=pass spfdomain=paypal.com dkim=pass dkdomain=paypal.com dmarc=pass fromdomain=paypal.com);\r\n spf=fail (google.com: domain of x@paypal.com does not designate 6.6.6.6 as permitted sender) smtp.mailfrom=x@paypal.com;\r\n dmarc=fail (p=REJECT sp=REJECT dis=QUARANTINE) header.from=paypal.com\r\n\r\n',
+      { spf: 'fail', dmarc: 'fail' }, 'paypal.com', 'fail'],
+    ['Authentication-Results: mx.google.com;\r\n spf=softfail (domain of x@paypal.com does not designate 6.6.6.6 (dkim=pass header.d=paypal.com)) smtp.mailfrom=x@paypal.com\r\n\r\n',
+      { spf: 'softfail', dkim: '' }, 'paypal.com', 'fail'],
   ];
 
-  root.TW_CASES = { EMAILS, URLS, THREATS, THREAT_BASE, AUTH_HEADERS };
+  root.TW_CASES = { EMAILS, URLS, THREATS, THREAT_BASE, AUTH_HEADERS, SIGNALS };
   if (typeof module === 'object' && module.exports) module.exports = root.TW_CASES;
 })(typeof globalThis !== 'undefined' ? globalThis : this);

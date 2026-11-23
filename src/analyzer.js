@@ -11,11 +11,58 @@
   const CONFUSABLES = { 'а': 'a', 'е': 'e', 'о': 'o', 'р': 'p', 'с': 'c', 'х': 'x', 'у': 'y', 'і': 'i', 'ӏ': 'l',
     'ԁ': 'd', 'ɡ': 'g', 'ո': 'n', 'ս': 'u', 'ѕ': 's', 'ј': 'j', 'һ': 'h', 'ԛ': 'q', 'ԝ': 'w', 'ı': 'i', 'ɩ': 'l' };
 
-  function normalizeHomoglyphs(s) {
+  function mapConfusables(s) {
     let out = '';
     for (const ch of lc(s)) out += CONFUSABLES[ch] || ch;
-    return out.replace(/0/g, 'o').replace(/1/g, 'l').replace(/3/g, 'e').replace(/5/g, 's').replace(/\$/g, 's')
+    return out;
+  }
+  function normalizeHomoglyphs(s) {
+    return mapConfusables(s).replace(/0/g, 'o').replace(/1/g, 'l').replace(/3/g, 'e').replace(/5/g, 's').replace(/\$/g, 's')
       .replace(/rn/g, 'm').replace(/vv/g, 'w');
+  }
+
+  // Scammers hide trigger words from filters with invisible characters ("pass​word"), and phones and mail apps
+  // turn ' into ’. Both used to stop phrases like "I'm in a meeting" or "verify your account" from matching.
+  const INVISIBLE_RE = /[­͏؜ᅟᅠ឴឵᠎​-‏‪-‮⁠-⁤⁦-⁯ㅤ﻿ﾠ]/g;
+  function cleanText(s) {
+    return (s || '').toString().replace(INVISIBLE_RE, '').replace(/[‘’‚‛′ʼ`´]/g, '\'')
+      .replace(/[“”„‟″]/g, '"');
+  }
+
+  // Punycode (RFC 3492) so "xn--pple-43d.com" can be read as "аpple.com" and recognised as an Apple look-alike.
+  function punyDecode(input) {
+    const base = 36, tMin = 1, tMax = 26, skew = 38, damp = 700;
+    const out = [];
+    let i = 0, n = 128, bias = 72;
+    const d = input.lastIndexOf('-');
+    for (let j = 0; j < Math.max(d, 0); j++) out.push(input.charCodeAt(j));
+    for (let idx = d > 0 ? d + 1 : 0; idx < input.length;) {
+      const oldi = i;
+      for (let w = 1, k = base; ; k += base) {
+        if (idx >= input.length) return null;
+        const c = input.charCodeAt(idx++);
+        const digit = c - 48 < 10 ? c - 22 : c - 65 < 26 ? c - 65 : c - 97 < 26 ? c - 97 : base;
+        if (digit >= base) return null;
+        i += digit * w;
+        const t = k <= bias ? tMin : k >= bias + tMax ? tMax : k - bias;
+        if (digit < t) break;
+        w *= base - t;
+      }
+      const len = out.length + 1;
+      let delta = oldi === 0 ? Math.floor((i - oldi) / damp) : (i - oldi) >> 1;
+      delta += Math.floor(delta / len);
+      let k = 0;
+      for (; delta > ((base - tMin) * tMax) >> 1; k += base) delta = Math.floor(delta / (base - tMin));
+      bias = Math.floor(k + ((base - tMin + 1) * delta) / (delta + skew));
+      n += Math.floor(i / len);
+      i %= len;
+      out.splice(i++, 0, n);
+    }
+    return String.fromCodePoint(...out);
+  }
+  function toUnicodeHost(host) {
+    if (!host || !host.includes('xn--')) return host;
+    return host.split('.').map((p) => (p.startsWith('xn--') ? punyDecode(p.slice(4)) || p : p)).join('.');
   }
 
   function registrableDomain(host) {
@@ -50,12 +97,19 @@
   }
   function wordRe(word) { return new RegExp('(^|[^a-z0-9])' + word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '($|[^a-z0-9])', 'i'); }
 
+  // Does free text name this brand? 3-letter names (UPS, IRS, DHL, AWS) used to be skipped entirely to avoid
+  // matching ordinary words, which hid parcel-fee and tax-refund scams. They now count when written in capitals.
+  function mentionsBrand(b, rawText) {
+    return b.keywords.some((k) => (k.length >= 4 ? wordRe(k).test(rawText)
+      : new RegExp('(^|[^A-Za-z0-9])' + k.toUpperCase() + '($|[^A-Za-z0-9])').test(rawText)));
+  }
+
   function brandLabels(brand) { return uniq(brand.domains.map((d) => domainLabel(d)).filter((l) => l.length >= 3)); }
   function brandOfDomain(host) { return D.BRANDS.find((b) => domainMatches(host, b.domains)) || null; }
 
   // Does `host` look like an imitation of a known brand? Returns { brand, kind } or null.
   function lookalikeBrand(host) {
-    host = lc(host);
+    host = lc(toUnicodeHost(lc(host))); // links arrive as punycode; judge the characters the reader actually sees
     if (!host || isIP(host) || brandOfDomain(host)) return null;
     const reg = registrableDomain(host);
     const label = domainLabel(reg);
@@ -104,6 +158,25 @@
     try { return new URL(href, 'https://invalid.local/'); } catch (e) { return null; }
   }
 
+  // Proofpoint URL Defense (used by many workplaces) rewrites every link. Without decoding it, every link in a
+  // protected mailbox looked like a harmless urldefense.com link and was never checked.
+  function proofpointInner(u) {
+    try {
+      if (/^\/v1\//.test(u.pathname)) return u.searchParams.get('u');
+      if (/^\/v2\//.test(u.pathname)) {
+        const enc = u.searchParams.get('u');
+        return enc ? decodeURIComponent(enc.replace(/-/g, '%').replace(/_/g, '/')) : null;
+      }
+      const m = u.href.match(/\/v3\/__(.+?)__;([^!]*)/);
+      if (!m) return null;
+      // v3 replaces some characters with "*" and keeps them, base64url-encoded, after "__;".
+      let fill = '';
+      try { fill = atob(m[2].replace(/-/g, '+').replace(/_/g, '/')); } catch (e) { /* none */ }
+      let k = 0;
+      return m[1].replace(/\*/g, () => fill[k++] || '');
+    } catch (e) { return null; }
+  }
+
   // Unwrap well-known redirect wrappers so we judge the real destination.
   function unwrapUrl(href) {
     let u = parseUrl(href);
@@ -114,6 +187,10 @@
       else if (h.endsWith('safelinks.protection.outlook.com')) inner = u.searchParams.get('url');
       else if (h === 'l.facebook.com' || h === 'lm.facebook.com') inner = u.searchParams.get('u');
       else if (h === 'out.reddit.com') inner = u.searchParams.get('url');
+      else if (h === 'l.instagram.com') inner = u.searchParams.get('u');
+      else if ((h === 'www.youtube.com' || h === 'youtube.com') && u.pathname === '/redirect') inner = u.searchParams.get('q');
+      else if (/(^|\.)linkedin\.com$/.test(h) && /^\/redir\/redirect/.test(u.pathname)) inner = u.searchParams.get('url');
+      else if (h === 'urldefense.com' || h === 'urldefense.proofpoint.com') inner = proofpointInner(u);
       if (!inner) break;
       const next = parseUrl(inner);
       if (!next || next.hostname === 'invalid.local') break;
@@ -233,7 +310,7 @@
         `This shortened link was followed for you: it really goes to "${res.host || expandedTo}".`, res.host || expandedTo));
       res.weight += 5;
     }
-    const text = (link.text || '').trim();
+    const text = cleanText(link.text).trim();
     if (!res.host) return res;
     const shown = domainInText(text);
     const tracking = domainMatches(res.host, D.TRACKING_DOMAINS);
@@ -247,7 +324,7 @@
     } else if (!shown && text) {
       // Text names a brand ("Log in to PayPal") but the link goes elsewhere.
       for (const b of D.BRANDS) {
-        if (b.keywords.some((k) => k.length >= 4 && wordRe(k).test(text)) && !domainMatches(res.host, b.domains) && !tracking
+        if (mentionsBrand(b, text) && !domainMatches(res.host, b.domains) && !tracking
           && !(ctx && ctx.senderBrand === b)) {
           if (/(log ?in|sign ?in|verify|confirm|account|update|secure|password|pay)/i.test(text)) {
             res.signals.push(sig('brand-text-link', 'link', 20, `Link mentions ${b.name} but goes elsewhere`,
@@ -270,7 +347,11 @@
     const head = text.split(/\r?\n\r?\n/)[0].replace(/\r?\n[ \t]+/g, ' '); // header block only, unfolded
     const line = head.split(/\r?\n/).find((l) => /^authentication-results:/i.test(l));
     if (!line) return null;
-    const v = line.replace(/^authentication-results:\s*/i, '');
+    let v = line.replace(/^authentication-results:\s*/i, '');
+    // Text in (parentheses) is a comment, and parts of it come from the sender: Gmail copies an upstream ARC seal's
+    // claims in as "arc=pass (... dmarc=pass ...)", and anyone can run an ARC sealer. Reading those made a forged
+    // PayPal email with dmarc=fail count as proven. Drop comments (they can nest) before reading any result.
+    for (let prev = ''; prev !== v;) { prev = v; v = v.replace(/\([^()]*\)/g, ' '); }
     const res = (method) => { const m = v.match(new RegExp('\\b' + method + '\\s*=\\s*([a-z]+)', 'i')); return m ? lc(m[1]) : ''; };
     const dkimDomains = [];
     for (const m of v.matchAll(/\bdkim\s*=\s*pass\b[^;]*?header\.(?:i|d)\s*=\s*@?([a-z0-9.\-]+)/gi)) dkimDomains.push(lc(m[1]));
@@ -303,16 +384,20 @@
   }
 
   function claimedBrand(displayName) {
-    const n = lc(displayName).replace(/[^a-z0-9\u00a1-\uffff\s.\-]/g, ' ');
+    // Look-alike letters are mapped first, so "P\u0430yPal" (Cyrillic \u0430) still claims to be PayPal.
+    const n = mapConfusables(cleanText(displayName)).replace(/[^a-z0-9\u00a1-\uffff\s.\-]/g, ' ');
+    const esc = (k) => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     for (const b of D.BRANDS) {
-      for (const k of b.keywords) {
-        if (!wordRe(k).test(n)) continue;
-        // Only count it as a brand claim if the rest of the name is generic ("Apple Support"),
-        // so real people named "Chase Smith" are not flagged.
-        let rest = n.replace(new RegExp(k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), ' ');
-        const tokens = rest.split(/[\s.\-]+/).filter(Boolean).filter((t) => !D.SERVICE_WORDS.includes(t));
-        if (tokens.length === 0) return b;
+      if (!b.keywords.some((k) => wordRe(k).test(n))) continue;
+      // Only count it as a brand claim if the rest of the name is generic ("Apple Support"),
+      // so real people named "Chase Smith" are not flagged. All of the brand's own names are removed, longest
+      // first, so "Microsoft Outlook" and "Apple iCloud" count as claims too (they used to slip through).
+      let rest = n;
+      for (const k of [...b.keywords].sort((x, y) => y.length - x.length)) {
+        rest = rest.replace(new RegExp('(^|[^a-z0-9])' + esc(k) + '(?=$|[^a-z0-9])', 'gi'), '$1 ');
       }
+      const tokens = rest.split(/[\s.\-]+/).filter(Boolean).filter((t) => !D.SERVICE_WORDS.includes(t));
+      if (tokens.length === 0) return b;
     }
     return null;
   }
@@ -410,7 +495,7 @@
   }
 
   function analyzeContent(subject, body) {
-    const text = ((subject || '') + '\n' + (body || '')).replace(/\s+/g, ' ');
+    const text = cleanText((subject || '') + '\n' + (body || '')).replace(/\s+/g, ' ');
     const found = findPhrases(text);
     const signals = [];
     for (const cat of Object.keys(found)) {
@@ -424,7 +509,9 @@
 
   // ---------- attachments ----------
   // attachments: [{ name, mime, html: { password, form, redirect, obfuscated } }] read from the webmail page.
-  const EXEC_EXT = /\.(exe|scr|js|jse|vbs|vbe|bat|cmd|com|pif|msi|msix|appx|hta|wsf|wsh|lnk|jar|ps1|psm1|cpl|reg|dll|chm|application|url)$/i;
+  // .one (OneNote), .xll (Excel add-in), .iqy/.slk (Excel web query / symbolic link) and .appref-ms / .library-ms /
+  // .search-ms are delivery formats used in real campaigns since macros were blocked by default.
+  const EXEC_EXT = /\.(exe|scr|js|jse|vbs|vbe|bat|cmd|com|pif|msi|msix|appx|appxbundle|msixbundle|hta|wsf|wsh|wsc|sct|lnk|jar|ps1|psm1|cpl|reg|dll|chm|application|url|one|onepkg|xll|iqy|slk|appref-ms|library-ms|search-ms|settingcontent-ms|msc|inf|gadget)$/i;
   const HTML_EXT = /\.(html?|shtml|xhtml|svg|mht|mhtml)$/i;
   const DISK_EXT = /\.(iso|img|vhdx?)$/i;
   const MACRO_EXT = /\.(docm|dotm|xlsm|xltm|xlam|pptm|potm|ppam|sldm)$/i;
@@ -439,7 +526,7 @@
       if (!name || seen.has(lc(name))) continue;
       seen.add(lc(name));
       const add = (id, weight, title, explain) => signals.push(sig(id, 'attachment', weight, title, explain, name));
-      const base = name.replace(/\.[a-z0-9]{1,5}$/i, '');
+      const base = name.replace(/\.(?:[a-z0-9]{1,5}|[a-z]+-ms|application)$/i, '');
       if (name.includes('«RTL»')) add('attachment-rtlo', 45, 'Attachment name is reversed to hide its type',
         'The file name contains a hidden character that flips the text, so a program can pretend to be a document.');
       if ((EXEC_EXT.test(name) || HTML_EXT.test(name) || DISK_EXT.test(name)) && (DOC_EXT.test(base) || /\.(pdf|docx?|xlsx?)\s+$/i.test(base))) {
@@ -568,7 +655,8 @@
     const qrLinks = [];
     for (const q of (input.qrCodes || [])) {
       const data = (q.data || '').trim();
-      if (!/^https?:\/\//i.test(data) && !/^[a-z0-9.\-]+\.[a-z]{2,}\//i.test(data)) continue;
+      // A bare "evil.example" (no https://, no path) is a web address too; phone cameras open it.
+      if (!/^https?:\/\//i.test(data) && !/^(?:[a-z0-9\-]+\.)+[a-z]{2,}(?:[/?#:]\S*)?$/i.test(data)) continue;
       qrLinks.push({ href: /^https?:/i.test(data) ? data : 'https://' + data, text: '', qr: true });
     }
 
@@ -604,9 +692,9 @@
 
     // Brand mentioned in text while asking for credentials/payment, but neither sender nor links belong to that brand.
     if ((content.found.credentials || content.found.financial) && !s.ctx.verifiedBrand && !trusted) {
-      const txt = lc((input.subject || '') + ' ' + (input.body || '').slice(0, 1500));
+      const txt = cleanText((input.subject || '') + ' ' + (input.body || '').slice(0, 1500));
       for (const b of D.BRANDS) {
-        if (!b.keywords.some((k) => k.length >= 4 && wordRe(k).test(txt))) continue;
+        if (!mentionsBrand(b, txt)) continue;
         const linksToBrand = linkResults.some((r) => domainMatches(r.host, b.domains));
         if (!linksToBrand && !(sender.domain && domainMatches(sender.domain, b.domains)) && !senderSignals.some((x) => x.title.includes(b.name))) {
           contentSignals.push(sig('brand-impersonation', 'sender', 20, `Pretends to be from ${b.name}`,
@@ -657,7 +745,7 @@
     const high = !known && score < 35;
 
     const signals = [...senderSignals, ...linkSignals, ...attachmentSignals, ...contentSignals, ...aiSigs].sort((a, b) => b.weight - a.weight);
-    const bodyText = input.body || '';
+    const bodyText = cleanText(input.body);
     let asks = input.context === 'open' ? detectAsks(bodyText, input.links, content.found) : [];
     if (input.ai && input.context === 'open') asks = uniq([...asks, ...(input.ai.asks || []).map((a) => AI_ASK_TEXT[a]).filter(Boolean)]);
     return {

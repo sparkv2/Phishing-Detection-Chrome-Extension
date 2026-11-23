@@ -75,7 +75,10 @@
     'braze.com', 'sparkpostmail.com', 'awstrack.me', 'mlsend.com', 'substack.com', 'mailjet.com', 'sendibt3.com',
     'sendinblue.com', 'brevo.com', 'constantcontact.com', 'marketo.com', 'mktoweb.com', 'mkt.com', 'pardot.com',
     'salesforce.com', 'iterable.com', 'customer.io', 'convertkit-mail.com', 'ck.page', 'beehiiv.com', 'medallia.com',
-    'urldefense.com', 'mimecast.com', 'protection.outlook.com', 'linkedin.com', 'google.com'];
+    'urldefense.com', 'mimecast.com', 'protection.outlook.com', 'linkedin.com'];
+  // google.com used to be listed here, which meant phishing pages hosted on Google Sites, Docs and Forms
+  // (sites.google.com, docs.google.com/forms) were never checked for "link text says paypal.com" tricks.
+  // Google's own redirect (google.com/url?q=) is unwrapped by the analyzer instead.
 
   // Multi-part public suffixes so "evil.co.uk" -> registrable "evil.co.uk", not "co.uk".
   const MULTI_SUFFIXES = ['co.uk', 'org.uk', 'gov.uk', 'ac.uk', 'me.uk', 'ltd.uk', 'com.au', 'net.au', 'org.au',
@@ -127,7 +130,7 @@
     ],
   };
 
-  const RISKY_ATTACHMENT = /\b[\w\- ]{1,60}\.(exe|scr|js|jse|vbs|vbe|bat|cmd|com|pif|msi|iso|img|hta|wsf|lnk|jar|ps1|docm|xlsm|pptm|html?|shtml)\b/i;
+  const RISKY_ATTACHMENT = /\b[\w\- ]{1,60}\.(exe|scr|js|jse|vbs|vbe|bat|cmd|com|pif|msi|iso|img|vhdx?|hta|wsf|lnk|jar|ps1|docm|xlsm|pptm|html?|shtml|one|xll|iqy|slk)\b/i;
 
   // Tiny built-in list for demos & tests. The real list is downloaded from OpenPhish by the background worker
   // and compared locally. Users' own reports are added to a separate local list.
