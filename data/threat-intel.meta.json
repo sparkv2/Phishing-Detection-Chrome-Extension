@@ -1,7 +1,8 @@
 {
  "format": 1,
- "generated": "2026-11-09T03:47:55Z",
- "total": 192899,
+ "generated": "2026-11-23T14:39:07Z",
+ "total": 190893,
+ "binSha256": "c3bcbdc5d5f54937f2d4d1e85132a570909c925b3b21df8de731db2acba60944",
  "descs": [
   {
    "cat": "phishing",
@@ -72,10 +73,10 @@
    "license": "OpenPhish Community Feed (free)",
    "homepage": "https://openphish.com/",
    "fetchedFrom": "https://openphish.com/feed.txt",
-   "fetched": "2026-11-09T03:47:55Z",
-   "count": 540,
-   "skipped": 1,
-   "sample": "www.r.oblox.com.et"
+   "fetched": "2026-11-23T14:39:08.085Z",
+   "count": 578,
+   "skipped": 0,
+   "sample": "bnpp.verifcv.com"
   },
   {
    "id": "phishing-filter",
@@ -84,9 +85,9 @@
    "license": "CC0 / source terms",
    "homepage": "https://gitlab.com/malware-filter/phishing-filter",
    "fetchedFrom": "https://malware-filter.gitlab.io/phishing-filter/phishing-filter-domains.txt",
-   "fetched": "2026-11-09T03:47:55Z",
-   "count": 20342,
-   "skipped": 242,
+   "fetched": "2026-11-23T14:39:08.618Z",
+   "count": 16514,
+   "skipped": 124,
    "sample": "0-1-x.16215785.xyz"
   },
   {
@@ -96,9 +97,9 @@
    "license": "CERT Polska open data",
    "homepage": "https://cert.pl/en/warning-list/",
    "fetchedFrom": "https://hole.cert.pl/domains/v2/domains.txt",
-   "fetched": "2026-11-09T03:47:55Z",
-   "count": 124074,
-   "skipped": 471,
+   "fetched": "2026-11-23T14:39:10.310Z",
+   "count": 126202,
+   "skipped": 459,
    "sample": "0-ilxrc-w285.p9bckp.sbs"
   },
   {
@@ -108,10 +109,10 @@
    "license": "CC0",
    "homepage": "https://urlhaus.abuse.ch/",
    "fetchedFrom": "https://malware-filter.gitlab.io/urlhaus-filter/urlhaus-filter-domains-online.txt",
-   "fetched": "2026-11-09T03:47:55Z",
-   "count": 1825,
-   "skipped": 1,
-   "sample": "1.70.76.132"
+   "fetched": "2026-11-23T14:39:10.434Z",
+   "count": 1933,
+   "skipped": 2,
+   "sample": "1.55.243.196"
   },
   {
    "id": "feodo",
@@ -120,7 +121,7 @@
    "license": "CC0",
    "homepage": "https://feodotracker.abuse.ch/",
    "fetchedFrom": "https://feodotracker.abuse.ch/downloads/ipblocklist.txt",
-   "fetched": "2026-11-09T03:47:55Z",
+   "fetched": "2026-11-23T14:39:10.520Z",
    "count": 5,
    "skipped": 0,
    "sample": "162.243.103.246"
@@ -132,10 +133,10 @@
    "license": "CC0",
    "homepage": "https://gitlab.com/malware-filter/botnet-filter",
    "fetchedFrom": "https://malware-filter.gitlab.io/botnet-filter/botnet-filter-dnscrypt-blocked-ips.txt",
-   "fetched": "2026-11-09T03:47:55Z",
-   "count": 47272,
+   "fetched": "2026-11-23T14:39:10.806Z",
+   "count": 46620,
    "skipped": 0,
-   "sample": "1.12.239.227"
+   "sample": "0.0.0.2"
   },
   {
    "id": "c2intel-ip",
@@ -144,8 +145,8 @@
    "license": "C2IntelFeeds (GitHub, drb-ra)",
    "homepage": "https://github.com/drb-ra/C2IntelFeeds",
    "fetchedFrom": "https://raw.githubusercontent.com/drb-ra/C2IntelFeeds/master/feeds/IPC2s-30day.csv",
-   "fetched": "2026-11-09T03:47:55Z",
-   "count": 228,
+   "fetched": "2026-11-23T14:39:10.813Z",
+   "count": 207,
    "skipped": 0,
    "sample": "1.117.74.144"
   },
@@ -156,8 +157,8 @@
    "license": "C2IntelFeeds (GitHub, drb-ra)",
    "homepage": "https://github.com/drb-ra/C2IntelFeeds",
    "fetchedFrom": "https://raw.githubusercontent.com/drb-ra/C2IntelFeeds/master/feeds/domainC2s-30day-filter-abused.csv",
-   "fetched": "2026-11-09T03:47:55Z",
-   "count": 86,
+   "fetched": "2026-11-23T14:39:10.881Z",
+   "count": 75,
    "skipped": 2,
    "sample": "1.win-faw.win"
   }
