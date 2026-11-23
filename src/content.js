@@ -21,7 +21,7 @@
   const HOST = location.host || 'local-file';
 
   // ---------- state (all in memory, for this page only) ----------
-  const state = { enabled: true, aiEnabled: false, trusted: new Set(), blocked: new Set(), enabledHosts: [], disabledHosts: [], active: false };
+  const state = { enabled: true, aiEnabled: false, trusted: new Set(), knownDomains: new Set(), blocked: new Set(), enabledHosts: [], disabledHosts: [], active: false };
   const threats = new Map();  // threat-list answers: host or 'url:'+key -> hit, or null if clean
   const expanded = new Map(); // shortened link -> where it really goes
   const verdicts = new Map(); // email key -> { level, score, known, high, top } (so rows and banners agree)
@@ -33,7 +33,7 @@
   const lc = (s) => (s || '').toString().toLowerCase().trim();
   // Identifies one email across inbox row and opened view: sender + subject.
   const keyOf = (email, name, subject) => (lc(email) || lc(name)) + '|' + lc(subject).replace(/\s+/g, ' ').slice(0, 200);
-  const lists = () => ({ trusted: state.trusted, blocked: state.blocked, threats, expanded });
+  const lists = () => ({ trusted: state.trusted, knownDomains: state.knownDomains, blocked: state.blocked, threats, expanded });
   // Message the background worker. Returns null instead of throwing while the extension is being reloaded.
   const send = async (msg) => { try { return await chrome.runtime.sendMessage(msg); } catch (e) { return null; } };
 
@@ -65,10 +65,11 @@
 
   // ---------- settings ----------
   async function loadState() {
-    const s = await chrome.storage.local.get(['enabled', 'aiEnabled', 'trusted', 'blocked', 'enabledHosts', 'disabledHosts', 'layoutRules']);
+    const s = await chrome.storage.local.get(['enabled', 'aiEnabled', 'trusted', 'knownDomains', 'blocked', 'enabledHosts', 'disabledHosts', 'layoutRules']);
     state.enabled = s.enabled !== false;
     state.aiEnabled = !!s.aiEnabled;
     state.trusted = new Set(s.trusted || []);
+    state.knownDomains = new Set(s.knownDomains || []); // sender domains the user said they know ("I know this sender")
     state.blocked = new Set(s.blocked || []);
     state.enabledHosts = s.enabledHosts || [];
     state.disabledHosts = s.disabledHosts || [];
@@ -379,6 +380,9 @@
         onShow: (s) => showMe(m, links, result, s),
         onTrust: () => updateList('trusted', result.sender.email, true),
         onUntrust: () => updateList('trusted', result.sender.email, false),
+        // "I know this sender" on a "not sure this is the official address" warning: remember the whole domain.
+        onKnowDomain: () => result.unsureSender && updateList('knownDomains', result.unsureSender.domain, true),
+        onForgetDomain: () => updateList('knownDomains', A.registrableDomain(result.sender.domain), false),
       });
       body.parentNode.insertBefore(banner, body);
       guardLinks(body, links, result);
@@ -535,6 +539,7 @@
     // If the user opted in, share a fingerprint of the fake domain (never for shared providers like gmail.com).
     if (!freeOrBrand) send({ type: 'pg-share-report', domain: A.registrableDomain(dom) });
     await updateList('trusted', sender.email, false);
+    await updateList('knownDomains', A.registrableDomain(dom), false);
     const s = await chrome.storage.local.get(['stats']);
     const st = s.stats || {}; st.reported = (st.reported || 0) + 1;
     await chrome.storage.local.set({ stats: st });

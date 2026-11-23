@@ -83,7 +83,7 @@ About 193,000 known-bad domains, IPs and URLs, compiled from free public feeds:
   - the email tells you to send money, gift cards or crypto, and the sender isn't trusted, an authenticated brand, or someone you've emailed before;
   - the sender's address imitates a known brand, the company the email itself names (`menrds.com` from "Menards"), or someone you email with;
   - the warning signs add up to a score below 35 (strong signs of a scam).
-- **Yellow** when the score is 35–69: some warning signs, not enough to call it a scam.
+- **Yellow** when the score is 35–69: some warning signs, not enough to call it a scam. This includes a sender domain that contains the company's name plus something else (`hartwelllumbermail.com` for "Hartwell Lumber"): the Summary says Tripwire isn't sure it's the official address and offers **I know this sender**, which remembers the domain (`knownDomains` in local storage). A known domain vouches for who sent the email, but its contents are still fully checked, unlike a trusted sender.
 - **Safe** at 70 or above. Score = 100 − weighted signals; unconfirmed emails never go below 10.
 - Wording alone is capped at 45 points. AI is capped at 32. Attachments are capped at 60.
 - Mail from a proven brand address (DMARC pass) with clean links gets wording penalties reduced by 60%, an unverified brand address by 40%, trusted senders by 70%. Trusting a sender never hides a failed anti-forgery check.

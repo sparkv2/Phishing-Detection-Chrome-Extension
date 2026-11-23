@@ -156,15 +156,17 @@
     const joined = lc(kept.join(''));
     return joined.length >= 5 ? [joined] : [];
   }
+  // Capitalised words and word pairs in the text, as { claim: 'homedepot', display: 'Home Depot' }.
   function textClaims(text) {
-    const out = new Set();
+    const out = new Map();
     const words = (text || '').slice(0, 3000).match(/\b\p{Lu}[\p{L}'’]+\b/gu) || [];
+    const key = (w) => lc(w).replace(/['’]/g, '');
     for (let i = 0; i < words.length; i++) {
-      const w = lc(words[i]).replace(/['’]/g, '');
-      if (w.length >= 6) out.add(w);
-      if (i + 1 < words.length) { const pair = w + lc(words[i + 1]).replace(/['’]/g, ''); if (pair.length >= 7) out.add(pair); }
+      const w = key(words[i]);
+      if (w.length >= 6 && !out.has(w)) out.set(w, words[i]);
+      if (i + 1 < words.length) { const pair = w + key(words[i + 1]); if (pair.length >= 7 && !out.has(pair)) out.set(pair, words[i] + ' ' + words[i + 1]); }
     }
-    return [...out];
+    return [...out].map(([claim, display]) => ({ claim, display }));
   }
   // Returns { claim, kind: 'homoglyph'|'typo', from: 'name'|'text' } when the sender's domain imitates a name the
   // email uses, otherwise null.
@@ -187,7 +189,26 @@
       return null;
     };
     for (const claim of nameClaims(sender.name, sender.email)) { const k = near(claim, 5); if (k) return { claim, kind: k, from: 'name' }; }
-    for (const claim of textClaims(text)) { const k = near(claim, 6); if (k) return { claim, kind: k, from: 'text' }; }
+    for (const { claim, display } of textClaims(text)) { const k = near(claim, 6); if (k) return { claim: display, kind: k, from: 'text' }; }
+    return null;
+  }
+
+  // The softer case: the domain *contains* the company's full name plus something else (menards-deals.com,
+  // menardsmail.com). Real companies sometimes send from domains like this, and so do scammers, so Tripwire can't
+  // tell. Returns { claim, display } for a yellow "not sure this is the official address", otherwise null.
+  function unsureCompanyDomain(sender, subject, body) {
+    const domain = lc(sender.domain);
+    if (!domain || isIP(domain) || brandOfDomain(domain)) return null;
+    const reg = registrableDomain(domain);
+    if (D.FREE_MAIL.includes(reg)) return null;
+    const label = normalizeHomoglyphs(domainLabel(reg).replace(/[-_]/g, ''));
+    const fromName = nameClaims(sender.name, sender.email);
+    const fromText = textClaims((subject || '') + '\n' + (body || ''));
+    // The domain is exactly a name the email uses (tractorsupply.com and "Tractor Supply"): it's that company's own.
+    if (fromName.includes(label) || fromText.some((t) => t.claim === label)) return null;
+    const contains = (claim) => claim.length >= 5 && label.includes(claim);
+    for (const claim of fromName) if (contains(claim)) return { claim, display: sender.name.trim() };
+    for (const t of fromText) if (t.claim.length >= 6 && contains(t.claim)) return t;
     return null;
   }
 
@@ -1040,6 +1061,9 @@
     lists = lists || {};
     const sender = parseSender(input.senderName, input.senderEmail);
     const trusted = !!(lists.trusted && sender.email && (lists.trusted.has(sender.email) || lists.trusted.has(sender.domain)));
+    // A sender domain the user said they know ("I know this sender" on the "not sure this is the official address"
+    // warning). It vouches for who sent the email, but unlike `trusted` the email's contents are still fully checked.
+    const knownDomain = !trusted && !!(lists.knownDomains && sender.domain && lists.knownDomains.has(registrableDomain(sender.domain)));
 
     // ----- 1. sender -----
     const s = analyzeSender(sender, lists, input.auth);
@@ -1052,7 +1076,7 @@
     // Trusting a sender silences warnings about them, except known threats and signs of forgery: a forged
     // sender can copy anyone, including people you trust.
     const FORGERY = /^(auth-fail|multiple-from|encoded-sender|header-markup|bidi-sender)/;
-    const senderSignals = (trusted ? s.signals.filter((x) => x.category === 'known' || FORGERY.test(x.id)) : s.signals).concat(headerTricks);
+    const senderSignals = (trusted || knownDomain ? s.signals.filter((x) => x.category === 'known' || FORGERY.test(x.id)) : s.signals).concat(headerTricks);
 
     // ----- 2. wording -----
     const content = analyzeContent(input.subject, input.body);
@@ -1065,15 +1089,24 @@
     const paySignals = trusted ? pay.signals.filter((x) => x.id === 'bank-details-changed') : pay.signals;
     const moneyAsk = !!(pay.phrases.length || content.found.financial || content.found.credentials || banks.length);
     // ----- 4. history and 5. thread (both count as sender signals) -----
-    senderSignals.push(...historySignals(input.history, sender, content.found, trusted, input.subject, moneyAsk));
-    if (!trusted) senderSignals.push(...threadSignals(input.thread, sender, moneyAsk));
-    // A misspelling of the company the email itself names (menrds.com from "Menards"). Skipped for senders you trust
-    // or already correspond with, and when the brand list already caught it.
-    if (!trusted && !(input.history && input.history.seenBefore) && !senderSignals.some((x) => x.id === 'lookalike-sender')) {
+    senderSignals.push(...historySignals(input.history, sender, content.found, trusted || knownDomain, input.subject, moneyAsk));
+    if (!trusted && !knownDomain) senderSignals.push(...threadSignals(input.thread, sender, moneyAsk));
+    // A misspelling of the company the email itself names (menrds.com from "Menards"). Skipped for senders you trust,
+    // know, or already correspond with, and when the brand list already caught it.
+    let unsureSender = null;
+    if (!trusted && !knownDomain && !(input.history && input.history.seenBefore) && !senderSignals.some((x) => x.id === 'lookalike-sender')) {
       const nl = nameLookalike(sender, input.subject, input.body);
       if (nl) senderSignals.push(sig('lookalike-name', 'sender', 45, 'Fake company address',
         `This email says it's from "${nl.claim}", but it was sent from ${sender.domain}, a ${nl.kind === 'homoglyph' ? 'look-alike using swapped characters (for example "0" for "o")' : 'misspelling'} of that name. Scammers register near-identical addresses to impersonate real companies.`,
         sender.email, { type: 'sender' }));
+      // The domain contains the company's full name plus something else: can't tell, so yellow and ask the user.
+      const un = nl ? null : unsureCompanyDomain(sender, input.subject, input.body);
+      if (un) {
+        unsureSender = { company: un.display, domain: registrableDomain(sender.domain) };
+        senderSignals.push(sig('unsure-company-domain', 'sender', 31, `Not sure this is ${un.display}'s official address`,
+          `This email says it's from "${un.display}" and comes from ${unsureSender.domain}, which contains that name. Tripwire can't confirm it is the company's official email address: real companies sometimes use addresses like this, and so do scammers. If you know this sender, click "I know this sender".`,
+          sender.email, { type: 'sender' }));
+      }
     }
     // ----- 7. attachments (the real list if the page shows one, otherwise file names mentioned in the text) -----
     const attachmentSignals = input.attachments && input.attachments.length ? analyzeAttachments(input.attachments, input.body)
@@ -1145,7 +1178,7 @@
     const direct = findDirectRequests((input.subject || '') + '\n' + (input.body || ''));
     const hist = input.history || {};
     const knownCorrespondent = !!(hist.seenBefore && !hist.lookalikeOf && !hist.lookalikeAddress && !hist.nameKnownElsewhere);
-    const vouched = trusted || s.ctx.authVerified || knownCorrespondent;
+    const vouched = trusted || knownDomain || s.ctx.authVerified || knownCorrespondent;
     const directSignals = [];
     if (direct.credentials.length && !trusted) directSignals.push(sig('asks-credentials', 'request', 50, 'Asks you to send a password or personal details',
       'This email asks you to send a password, security code, or personal number such as an SSN by email. Real companies and services never do this. Don\'t reply with any of it.',
@@ -1238,7 +1271,7 @@
     if (paySignals.length) tips.push('Before paying, call the company on a phone number you already have (an old invoice, their website). Never use a number or reply address from this email.');
     if (signals.some((x) => /^thread-|lookalike-correspondent/.test(x.id))) tips.push('Compare the sender\'s address letter by letter with earlier emails in your inbox.');
     return {
-      score, level, high, known, trusted, signals,
+      score, level, high, known, trusted, knownDomain, unsureSender, signals,
       threatCategory: known ? ((signals.find((x) => x.category === 'known') || {}).threatCategory || 'phishing') : null,
       sender,
       verifiedBrand: s.ctx.verifiedBrand ? s.ctx.senderBrand.name : null,

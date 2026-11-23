@@ -58,6 +58,8 @@
   .ok { color: #1a7f37; font-weight: 600; }
   .bad { color: #c62828; font-weight: 700; }
   .muted { color: #57606a; }
+  .unsure { background: #fff8e1; color: #3d2b00; border-left: 3px solid #b26a00; padding: 6px 8px; border-radius: 4px; margin: 6px 0; }
+  .unsure .btn { margin-top: 6px; }
   .reason { padding: 8px 10px; margin: 6px 0; border-radius: 8px; background: #f6f8fa; border-left: 3px solid var(--c); }
   .reason b { display: block; }
   .ev { display: inline-block; margin-top: 4px; font: 12px/1.4 ui-monospace, Consolas, monospace; background: #fff;
@@ -183,8 +185,24 @@
         : h('span', { class: 'muted' }, `  · address matches ${result.verifiedBrand} (not verified)`))
       : result.forgedBrand ? h('span', { class: 'bad' }, `  ✕ forged ${result.forgedBrand} address`) : null;
     const fromLine = h('p', { class: 'from' }, 'From: ', s.name ? s.name + ' ' : '', s.email ? `<${s.email}>` : '(address not shown)',
-      brandNote, result.trusted ? h('span', { class: 'ok' }, '  ✓ you marked this sender as trusted') : null);
-    const sum = h('section', {}, h('h4', {}, result.aiSummary ? 'Summary (on-device AI)' : 'Summary'), fromLine, h('p', {}, result.summary));
+      brandNote, result.trusted ? h('span', { class: 'ok' }, '  ✓ you marked this sender as trusted') : null,
+      result.knownDomain ? h('span', { class: 'ok' }, `  ✓ you said you know ${(s.email || '').split('@')[1] || 'this sender'}`) : null);
+    const sum = h('section', {}, h('h4', {}, result.aiSummary ? 'Summary (on-device AI)' : 'Summary'), fromLine);
+    // The domain contains the company's name, but Tripwire can't tell if it's the official address: say so, and
+    // let the user vouch for the domain. (Its emails' contents are still checked afterwards.)
+    if (result.unsureSender && opts.onKnowDomain) {
+      const u = result.unsureSender;
+      const box = h('div', { class: 'unsure' },
+        h('b', {}, `⚠ We're not sure ${u.domain} is ${u.company}'s official email address.`), h('br'),
+        'If you know this sender, tell Tripwire and it will stop asking about emails from this address. Their emails will still be checked for scams.');
+      const btn = h('button', { class: 'btn', type: 'button' }, 'I know this sender');
+      btn.addEventListener('click', () => {
+        if (confirm(`Only continue if you are sure ${u.domain} really belongs to ${u.company}.\n\nScammers register addresses that contain real company names. Mark ${u.domain} as a sender you know?`)) opts.onKnowDomain();
+      });
+      box.append(h('div', {}, btn));
+      sum.append(box);
+    }
+    sum.append(h('p', {}, result.summary));
     if (result.asks.length) sum.append(h('p', {}, 'This email is asking you to:'), h('ul', {}, result.asks.map((a) => h('li', {}, a))));
     if (result.attachments && result.attachments.length) sum.append(h('p', { class: 'from' }, 'Attachments: ' + result.attachments.join(', ')));
     const PENDING = { auth: 'sender authentication', attachments: 'attachments', qr: 'images for QR codes', ai: 'wording (on-device AI)' };
@@ -243,12 +261,13 @@
         opts.onReport && opts.onReport();
       } }, 'Report as phishing anyway'));
     }
-    if (!result.known && !result.trusted && s.email) {
+    if (!result.known && !result.trusted && !result.knownDomain && !result.unsureSender && s.email) {
       actions.append(h('button', { class: 'btn', onclick: () => {
         if (confirm(`Only trust ${s.email} if you are sure you know this sender.\n\nScammers often copy names of people and companies you know. Trust this sender?`)) opts.onTrust && opts.onTrust();
       } }, 'I know this sender'));
     }
     if (result.trusted) actions.append(h('button', { class: 'btn', onclick: () => opts.onUntrust && opts.onUntrust() }, 'Stop trusting this sender'));
+    if (result.knownDomain) actions.append(h('button', { class: 'btn', onclick: () => opts.onForgetDomain && opts.onForgetDomain() }, 'I don\'t know this sender'));
     const foot = h('div', { class: 'foot' });
     foot.innerHTML = MARK_SVG; // static, trusted markup (no email content)
     foot.append(h('span', {}, 'Checked privately on your device by ', h('b', {}, 'Trip', h('span', { class: 'wire' }, 'wire')), ' — no email content was sent anywhere.'));

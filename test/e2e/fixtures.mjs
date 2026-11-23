@@ -109,6 +109,23 @@ export const outlook = {
   </div>${TICKER}`) } : null),
 };
 
+// The same Outlook page reading an email from a domain that contains the company's name (can't tell if official).
+export const outlookUnsure = {
+  url: 'https://outlook.live.com/mail/0/id/AQMkADAwATM0MDAAMS1iZDR',
+  hosts: ['outlook.live.com'],
+  routes: (url) => (new URL(url).pathname.startsWith('/mail/') ? { body: html('Mail - Tester - Outlook', `
+  <div role="main">
+    <div role="listbox" aria-label="Message list">
+      <div role="option"><span title="orders@hartwelllumbermail.com">Hartwell Lumber</span> <span class="subject">Your order</span> Your order is ready for pickup.</div>
+    </div>
+    <div id="reading">
+      <div class="header"><span title="orders@hartwelllumbermail.com">Hartwell Lumber</span></div>
+      <div role="heading" aria-level="2">Your order</div>
+      <div aria-label="Message body" id="read-body"><p>Your order is ready for pickup on Saturday morning at the Riverside yard.</p></div>
+    </div>
+  </div>${TICKER}`) } : null),
+};
+
 // ---------- Yahoo ----------
 export const yahoo = {
   url: 'https://mail.yahoo.com/d/folders/1/messages/42',

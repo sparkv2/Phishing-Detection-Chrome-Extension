@@ -22,7 +22,7 @@ const ALL_SITES = ['https://*/*', 'http://*/*']; // the permission the page guar
 
 // ---------- render: read every setting and fill in the popup (called on open and after each change) ----------
 async function render() {
-  const s = await chrome.storage.local.get(['enabled', 'stats', 'trusted', 'blocked', 'useFeed', 'communityEnabled', 'shareReports', 'enabledHosts', 'disabledHosts', 'layoutRules',
+  const s = await chrome.storage.local.get(['enabled', 'stats', 'trusted', 'knownDomains', 'blocked', 'useFeed', 'communityEnabled', 'shareReports', 'enabledHosts', 'disabledHosts', 'layoutRules',
     'expandLinks', 'guardEnabled', 'pwAlert', 'aiEnabled', 'health']);
   renderExtras(s);
   const st = s.stats || {};
@@ -32,6 +32,7 @@ async function render() {
   $('sPhish').textContent = st.phishing || 0;
   $('sWarn').textContent = st.warnings || 0;
   renderList('trustList', 'trustCount', s.trusted || [], 'trusted', 'No trusted senders yet.');
+  renderList('knownList', 'knownCount', s.knownDomains || [], 'knownDomains', 'None yet. Use "I know this sender" when Tripwire isn\'t sure about an address.');
   renderList('blockList', 'blockCount', s.blocked || [], 'blocked', 'You haven\'t reported anyone yet.');
   $('useFeed').checked = s.useFeed !== false;
   const lr = s.layoutRules;

@@ -13,7 +13,7 @@
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { launchChrome, sleep } from './cdp.mjs';
-import { gmail, gmailRedesigned, outlook, yahoo } from './fixtures.mjs';
+import { gmail, gmailRedesigned, outlook, outlookUnsure, yahoo } from './fixtures.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const chromePath = process.env.CHROME_PATH;
@@ -132,6 +132,25 @@ try {
     assert(/danger/i.test(b[0].title), 'headline: ' + b[0].title); // red: "enter your password to confirm"
     assert(b[0].reasons.some((r) => /send a password/.test(r)), 'password-request reason missing: ' + b[0].reasons.join(' | '));
     assert(b[0].reasons.some((r) => /free email account/.test(r)), 'brand-on-free-mail reason missing: ' + b[0].reasons.join(' | '));
+  });
+  await closeTab(page);
+
+  // ---------------- "Not sure this is the official address" -> "I know this sender" ----------------
+  page = await chrome.openPage(outlookUnsure.url, outlookUnsure.routes, outlookUnsure.hosts);
+  await check('Unsure company address: yellow with a question; "I know this sender" re-checks it as known', async () => {
+    const UNSURE = `(() => { const h = document.querySelector('.pg-banner-host'); const u = h && h.shadowRoot.querySelector('.unsure'); return u ? u.textContent : null; })()`;
+    const text = await page.waitFor(UNSURE, 10000, 'unsure note');
+    assert(/not sure hartwelllumbermail\.com is Hartwell Lumber's official email address/.test(text), 'note: ' + text);
+    let b = await page.eval(`return ${BANNER};`);
+    assert(/suspicious/i.test(b[0].title), 'headline before: ' + b[0].title);
+    // Accept the "are you sure?" dialog the button opens, then click it.
+    chrome.conn.on((msg) => { if (msg.sessionId === page.id && msg.method === 'Page.javascriptDialogOpening') page.send('Page.handleJavaScriptDialog', { accept: true }).catch(() => {}); });
+    await page.eval(`document.querySelector('.pg-banner-host').shadowRoot.querySelector('.unsure button').click(); return true;`);
+    const known = await page.waitFor(`${UNSURE} === null && ${BANNER}.length ? ${BANNER}[0] : null`, 10000, 'banner re-checked');
+    assert(/no warning signs/i.test(known.title), 'headline after: ' + known.title);
+    const s = await storage(['knownDomains']);
+    assert(JSON.stringify(s.knownDomains) === '["hartwelllumbermail.com"]', 'stored: ' + JSON.stringify(s.knownDomains));
+    await chrome.worker.eval(`await chrome.storage.local.remove('knownDomains');`);
   });
   await closeTab(page);
 
