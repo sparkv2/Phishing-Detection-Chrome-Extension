@@ -90,7 +90,7 @@ About 193,000 known-bad domains, IPs and URLs, compiled from free public feeds:
 - Brand claims only count when the display name is *just* the brand ("Chase Security"), not a person ("Chase Miller").
 
 ## Permissions
-The content script runs only on known webmail sites (Gmail, Outlook, Yahoo, AOL, Proton, Zoho, Fastmail, iCloud). On any other webmail, click the toolbar icon → **Check emails on this site**. Chrome asks for permission for that one site. Turning on **Protect the pages I open** asks for all-sites access. Turning it off gives it back. See `STORE_LISTING.md` for a justification of each permission.
+The content script runs only on known webmail sites (Gmail, Outlook, Yahoo, AOL, Proton, Zoho, Fastmail, iCloud). On any other webmail, click the toolbar icon → **Check emails on this site**. Chrome asks for permission for that one site. Turning on **Protect the pages I open** asks for all-sites access. Turning it off gives it back.
 
 ## Privacy
 The full policy is in [PRIVACY.md](PRIVACY.md). In short:
