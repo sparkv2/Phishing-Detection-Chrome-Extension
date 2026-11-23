@@ -51,7 +51,8 @@ test('forged brand address loses brand trust and is strongly suspicious', () => 
   assert.equal(r.verifiedBrand, null);
   assert.equal(r.forgedBrand, 'PayPal');
   assert.equal(r.auth, 'fail');
-  assert.ok(r.high, describe(r));
+  assert.equal(r.level, 'phishing', describe(r)); // it also asks for the password
+  assert.ok(r.signals.some((s) => s.id === 'asks-credentials'), describe(r));
 });
 
 test('brand address without an auth check gets less wording discount than a proven one', () => {
@@ -160,7 +161,7 @@ test('look-alike candidates include the real domain or address', () => {
 test('hijacked thread with a payment change is very suspicious and gives specific advice', () => {
   const c = C.EMAILS.find(([n]) => n.startsWith('Hijacked thread'))[1];
   const r = A.analyzeEmail(Object.assign({ context: 'open' }, c), {});
-  assert.ok(r.high, describe(r));
+  assert.equal(r.level, 'phishing', describe(r)); // a look-alike telling you to send the payment elsewhere
   assert.ok(r.signals.some((s) => s.id === 'thread-lookalike'));
   assert.ok(r.signals.some((s) => s.id === 'payment-change'));
   assert.ok(r.tips[0].startsWith('Before paying, call the company'));
@@ -251,3 +252,35 @@ for (const s of meta.sources) {
     }
   });
 }
+
+test('direct requests: real asks are found, everyday wording is not', () => {
+  const asks = [
+    ['Please respond to this email with your email and password', 'credentials'],
+    ['Reply with your username and password so I can fix it.', 'credentials'],
+    ['Send us your SSN and date of birth.', 'credentials'],
+    ['What is your PIN?', 'credentials'],
+    ['We need your social security number to process this.', 'credentials'],
+    ['Please send me $300 today.', 'money'],
+    ['Wire the funds before noon.', 'money'],
+    ['Buy three Apple gift cards and send me the codes.', 'money'],
+    ['Zelle me when you can.', 'money'],
+    ['Send 0.05 bitcoin to this wallet.', 'money'],
+  ];
+  for (const [text, kind] of asks) assert.ok(A.findDirectRequests(text)[kind].length, `${kind} not found in: ${text}`);
+  const ordinary = [
+    'We will never ask for your password by email.',
+    'Do not share your one-time code with anyone.',
+    'Click the link to enter your new password.',
+    'Can you send me the slides?',
+    'Please share your feedback on the draft.',
+    'Your password was changed successfully.',
+    'Enter your email to subscribe to our newsletter.',
+    'We sent a verification code to your phone.',
+    'Your refund of $20 has been sent to your card.',
+    'Pin the post to the top of the channel.',
+  ];
+  for (const text of ordinary) {
+    const r = A.findDirectRequests(text);
+    assert.equal(r.credentials.length + r.money.length, 0, `false alarm on: ${text} -> ${JSON.stringify(r)}`);
+  }
+});

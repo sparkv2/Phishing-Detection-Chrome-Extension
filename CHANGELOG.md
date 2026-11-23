@@ -1,5 +1,8 @@
 # Changelog
 
+## Unreleased
+- **Red for direct requests.** An email that asks you to send a password, security code or personal details (an SSN, card or bank number, date of birth...) is now red, even when no threat list knows the sender. So is an email telling you to send money, gift cards or cryptocurrency, unless it comes from someone you trust, a brand address that passed authentication, or someone you've emailed with before. Warnings such as "we will never ask for your password" don't count.
+
 ## 1.4.1 (2026-11-20)
 - **Fix: sender authentication on live Gmail.** Gmail keeps the message ID one level above where Tripwire looked, so "Show original" was never fetched, and real brand mail showed "not verified" instead of "✓ verified". Found by checking Tripwire on a real Gmail account. The headers are now also read as plain text, which works with Gmail's Trusted Types security policy.
 - **Browser tests** (`npm run test:e2e`, the `browser` job in CI): the extension is loaded into Chrome for Testing and checked on fake Gmail, Outlook and Yahoo pages, including a simulated Gmail redesign recovered by updated layout rules.

@@ -15,7 +15,8 @@
 //   6. Links       analyzeLink        where each link and QR code really goes
 //   7. Attachments analyzeAttachments disguised programs, web-page attachments, login forms
 //   +  Raw message inspectRawMessage  header / signature / script tricks only visible in the raw email (Gmail)
-//   8. Scoring     each group adds a capped penalty; red is reserved for *confirmed* threats only
+//   8. Scoring     each group adds a capped penalty; red is for confirmed threats and for direct requests for
+//                  passwords, personal details, or money from an unverified sender (findDirectRequests)
 //
 // Accuracy is measured with tools/eval-dataset.mjs against a folder of real emails (e.g. the EPVME dataset).
 //
@@ -635,6 +636,48 @@
     return { signals, found };
   }
 
+  // ---------- direct requests ----------
+  // Some requests are dangerous whatever else the email looks like: "reply with your password", "send us your SSN",
+  // "buy gift cards and send me the codes", "wire $2,000 to this account". No real company asks for the first kind
+  // by email, and a stranger demanding money is a scam. These make the email red even when no list confirms it.
+  // Checked one sentence at a time, so "never share your password" (a negation) doesn't count.
+  const SENSITIVE = '(?:e-?mail(?: address)? and password|user ?name and password|password|passcode|pin(?: number| code)?|' +
+    'log ?in(?: details| credentials| information| info)?|credentials|social security(?: number)?|ssn|security (?:code|questions?)|' +
+    'verification code|one[- ]time (?:code|password|passcode)|2fa code|(?:credit |debit |bank )?card (?:number|details|info(?:rmation)?)|' +
+    'cvv|cvc|bank (?:account(?: number| details)?|login|details|information)|account number|routing number|date of birth|' +
+    'driver\'?s licen[cs]e(?: number)?|passport(?: number| details)?|tax id|national id(?: number)?|mother\'?s maiden name)';
+  const ASK_VERB = '(?:reply|respond|send|e-?mail|text|give|provide|share|submit|enter|type|confirm|verify|tell|forward|include|update)';
+  const CRED_RES = [
+    new RegExp(`\\b${ASK_VERB}\\b[^.!?\\n]{0,40}?\\byour\\s+(?:(?:full|current|old|account|online|banking|email)\\s+){0,2}${SENSITIVE}\\b`, 'i'),
+    new RegExp(`\\bwhat(?:'s| is) your\\s+(?:(?:current|account|online|banking|email)\\s+)?${SENSITIVE}\\b`, 'i'),
+    new RegExp(`\\b(?:need|require|want)\\s+(?:your|the)\\s+${SENSITIVE}\\b`, 'i'),
+  ];
+  const AMOUNT = '(?:[$£€]\\s?\\d[\\d,.]*(?:\\s?k)?|\\d[\\d,.]*\\s?(?:dollars|usd|eur|euros|gbp|pounds))';
+  const MONEY_RES = [
+    new RegExp(`\\b(?:send|give|transfer|wire)\\s+(?:me|us)\\s+(?:the\\s+|some\\s+)?(?:money|funds|cash|${AMOUNT})`, 'i'),
+    new RegExp(`\\b(?:pay|lend|loan|venmo|zelle|cash ?app|paypal)\\s+(?:me|us)\\b`, 'i'),
+    new RegExp(`\\b(?:send|transfer|wire)\\s+(?:the\\s+|a\\s+)?(?:money|funds|cash|payment|${AMOUNT})\\b`, 'i'),
+    new RegExp(`\\bpay\\s+(?:the\\s+)?${AMOUNT}\\s+(?:to|into)\\b`, 'i'),
+    /\b(?:buy|purchase|get|pick up)\s+(?:\w+\s+){0,4}?gift ?cards?\b/i,
+    /\b(?:send|reply with|text|email)\s+(?:me|us)?\s*(?:the\s+)?(?:gift ?card\s+)?(?:codes?|card numbers?)\s+(?:on|from|off)\b|\bscratch (?:off )?the (?:back|codes?)\b/i,
+    /\bsend\b[^!?\n]{0,30}?\b(?:bitcoin|btc|crypto(?:currency)?|usdt|tether|ethereum|eth)\b/i, // "." allowed: "0.05 BTC"
+  ];
+  const NEGATED = /\b(?:never|do not|don't|dont|will not|won't|should not|shouldn't|must not|nobody|no one|not ask|not request)\b/i;
+
+  // Returns { credentials: [phrases], money: [phrases] } for direct requests found in the text.
+  function findDirectRequests(text) {
+    const out = { credentials: [], money: [] };
+    const sentences = (text || '').replace(/\s+/g, ' ').split(/(?<=[.!?])\s+|\n/);
+    for (const s of sentences) {
+      if (NEGATED.test(s)) continue;
+      for (const re of CRED_RES) { const m = s.match(re); if (m && !/\bnew (?:password|pin|passcode)\b/i.test(m[0])) out.credentials.push(m[0].trim()); }
+      for (const re of MONEY_RES) { const m = s.match(re); if (m) out.money.push(m[0].trim()); }
+    }
+    out.credentials = uniq(out.credentials.map(lc));
+    out.money = uniq(out.money.map(lc));
+    return out;
+  }
+
   // ---------- attachments ----------
   // attachments: [{ name, mime, html: { password, form, redirect, obfuscated } }] read from the webmail page.
   // `html` is only present for HTML attachments whose contents the content script could read (Gmail).
@@ -1035,6 +1078,22 @@
       }
     }
 
+    // Direct requests for passwords or personal details, and money demands from a sender we can't vouch for.
+    // A sender is vouched for if you trust them, they are a brand address that passed authentication, or you've
+    // corresponded with them before (and they aren't a look-alike or a new address for a familiar name).
+    const direct = findDirectRequests((input.subject || '') + '\n' + (input.body || ''));
+    const hist = input.history || {};
+    const knownCorrespondent = !!(hist.seenBefore && !hist.lookalikeOf && !hist.lookalikeAddress && !hist.nameKnownElsewhere);
+    const vouched = trusted || s.ctx.authVerified || knownCorrespondent;
+    const directSignals = [];
+    if (direct.credentials.length && !trusted) directSignals.push(sig('asks-credentials', 'request', 50, 'Asks you to send a password or personal details',
+      'This email asks you to send a password, security code, or personal number such as an SSN by email. Real companies and services never do this. Don\'t reply with any of it.',
+      direct.credentials.slice(0, 3).map((x) => `"${x}"`).join(', '), { type: 'text', phrases: direct.credentials }));
+    if (direct.money.length && !vouched) directSignals.push(sig('asks-money', 'request', 45, 'Tells you to send money',
+      `This email tells you to send money, gift cards or cryptocurrency, and it comes from ${sender.email || 'a sender'} that Tripwire can't verify. Contact the person or company another way before paying anything.`,
+      direct.money.slice(0, 3).map((x) => `"${x}"`).join(', '), { type: 'text', phrases: direct.money }));
+    const redRequest = directSignals.length > 0;
+
     // Combination bonus: pressure + a sensitive request is the classic phishing recipe.
     const coercion = !!(content.found.urgency || content.found.fear || content.found.secrecy);
     const ask = !!(content.found.credentials || content.found.financial || pay.phrases.length);
@@ -1048,7 +1107,7 @@
     // (especially wording, which marketing email also uses) from dominating. Within links and attachments the worst
     // item counts fully and the rest at a quarter.
     let contentPenalty = contentSignals.reduce((a, x) => a + x.weight, 0);
-    contentPenalty = Math.min(contentPenalty, 45); // wording alone can never make an email "red"
+    contentPenalty = Math.min(contentPenalty, 45); // general wording alone never makes an email "red" (direct requests can)
     const cleanLinks = !riskyLinks.some((r) => r.weight >= 20);
     if (trusted) contentPenalty *= 0.3;
     else if (s.ctx.authVerified && cleanLinks) contentPenalty *= 0.4; // proven brand address, clean links
@@ -1074,20 +1133,22 @@
     if (paymentPenalty && senderSignals.some((x) => /lookalike|thread-|new-address-for-name|auth-fail/.test(x.id))) comboTech = Math.max(comboTech, 20);
 
     const known = senderSignals.some((x) => x.category === 'known') || linkResults.some((r) => r.known);
-    let score = Math.round(100 - contentPenalty - senderPenalty - linkPenalty - attachmentPenalty - structurePenalty - aiPenalty - paymentPenalty - comboTech);
+    const requestPenalty = directSignals.reduce((a, x) => a + x.weight, 0);
+    let score = Math.round(100 - contentPenalty - senderPenalty - linkPenalty - attachmentPenalty - structurePenalty - aiPenalty - paymentPenalty - comboTech - requestPenalty);
     // 0 is reserved for confirmed phishing; unconfirmed emails bottom out at 10 however many warning signs they have.
-    score = known ? 0 : Math.max(10, Math.min(100, score));
+    score = known ? 0 : Math.max(10, Math.min(redRequest ? 20 : 100, score));
 
-    // Red ("phishing") ONLY for confirmed phishing: a sender/link on the known-scam list or reported by the user.
+    // Red ("phishing") for confirmed phishing (a sender/link on the known-scam list or reported by the user), and
+    // for direct requests: a password or personal details, or money from a sender we can't vouch for.
     // Everything else with warning signs is yellow ("suspicious"); `high` marks the strongly suspicious ones.
     let level = 'safe';
-    if (known) level = 'phishing';
+    if (known || redRequest) level = 'phishing';
     else if (score < 70) level = 'suspicious';
-    const high = !known && score < 35;
+    const high = !known && !redRequest && score < 35;
 
     // ----- the result -----
     // All reasons, most serious first (that is the order the banner shows them in).
-    const signals = [...senderSignals, ...linkSignals, ...attachmentSignals, ...structureSignals, ...paySignals, ...contentSignals, ...aiSigs].sort((a, b) => b.weight - a.weight);
+    const signals = [...directSignals, ...senderSignals, ...linkSignals, ...attachmentSignals, ...structureSignals, ...paySignals, ...contentSignals, ...aiSigs].sort((a, b) => b.weight - a.weight);
     // Every reason gets a "Show me" target unless it already has one.
     for (const x of signals) {
       if (x.target) continue;
@@ -1097,6 +1158,11 @@
     }
     const bodyText = input.body || '';
     let asks = input.context === 'open' ? detectAsks(bodyText, input.links, content.found) : [];
+    if (input.context === 'open') {
+      if (direct.credentials.length) asks.unshift('Give personal information, a password or a code');
+      if (direct.money.length) asks.unshift('Send money, gift cards or cryptocurrency');
+      asks = uniq(asks);
+    }
     if (pay.phrases.length && input.context === 'open') asks.unshift('Send money to a new or different bank account');
     if (input.ai && input.context === 'open') asks = uniq([...asks, ...(input.ai.asks || []).map((a) => AI_ASK_TEXT[a]).filter(Boolean)]);
     // Advice specific to what was found, shown first under "What you should do".
@@ -1123,5 +1189,5 @@
 
   // Exported for the content script, background worker, page guard, server and tests.
   root.PG_Analyzer = { analyzeEmail, analyzeUrl, analyzeLink, analyzeAttachments, registrableDomain, lookalikeBrand, unwrapUrl, summarize,
-    parseSender, parseAuthResults, authVerdict, findBankDetails, lookalikeCandidates, looksLike, parseMime, inspectRawMessage, decodeWords };
+    parseSender, parseAuthResults, authVerdict, findBankDetails, findDirectRequests, lookalikeCandidates, looksLike, parseMime, inspectRawMessage, decodeWords };
 })(typeof globalThis !== 'undefined' ? globalThis : this);

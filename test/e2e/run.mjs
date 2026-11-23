@@ -71,7 +71,8 @@ try {
     const b = await page.waitFor(`${BANNER}.length ? ${BANNER} : null`, 10000, 'banner');
     assert(b.length === 1, `expected exactly one banner, got ${b.length}`);
     assert(b[0].before === 'body', 'banner is not above the opened email');
-    assert(/suspicious/i.test(b[0].title), 'unexpected headline: ' + b[0].title);
+    // Red: a look-alike of the supplier telling you to send the payment to a new account.
+    assert(/danger/i.test(b[0].title), 'unexpected headline: ' + b[0].title);
   });
   await check('Gmail: reply-chain hijack and payment change are detected', async () => {
     const r = (await page.eval(`return ${BANNER};`))[0].reasons;
@@ -128,7 +129,8 @@ try {
     const b = await page.waitFor(`${BANNER}.length ? ${BANNER} : null`, 10000, 'banner');
     assert(b.length === 1, `expected one banner, got ${b.length}`);
     assert(b[0].before === 'read-body', 'banner is not above the reading pane');
-    assert(/suspicious/i.test(b[0].title), 'headline: ' + b[0].title);
+    assert(/danger/i.test(b[0].title), 'headline: ' + b[0].title); // red: "enter your password to confirm"
+    assert(b[0].reasons.some((r) => /send a password/.test(r)), 'password-request reason missing: ' + b[0].reasons.join(' | '));
     assert(b[0].reasons.some((r) => /free email account/.test(r)), 'brand-on-free-mail reason missing: ' + b[0].reasons.join(' | '));
   });
   await closeTab(page);

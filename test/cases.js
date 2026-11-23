@@ -12,19 +12,30 @@
       links: [{ href: 'http://paypa1-security.com/login', text: 'Log in to PayPal' }, { href: 'http://198.51.100.23/secure', text: 'www.paypal.com' }] }, 'phishing'],
     ['Microsoft from gmail + shortener', { senderName: 'Microsoft 365 Support', senderEmail: 'it.helpdesk.office365@gmail.com', subject: 'ACTION REQUIRED: Password expires today',
       body: 'Dear user, Your Office 365 password expires today. Failure to verify will result in your mailbox being disabled. Click below to keep your current password. You will need to enter your password to confirm.',
-      links: [{ href: 'https://bit.ly/3xYz-o365', text: 'Keep my password' }] }, 'suspicious'],
+      links: [{ href: 'https://bit.ly/3xYz-o365', text: 'Keep my password' }] }, 'phishing'],
     ['DHL fee scam', { senderName: 'DHL Express', senderEmail: 'noreply@dhl-delivery-notice.top', subject: 'Package on hold: delivery fee unpaid',
       body: 'Dear Customer, Your package could not be delivered because a processing fee of $1.99 is unpaid. Pay the fee within 48 hours or your package will be returned.',
       links: [{ href: 'https://dhl.com.redelivery-fee.top/pay', text: 'Pay now' }] }, 'suspicious'],
     ['Apple homoglyph (cyrillic a) sender', { senderName: 'Apple', senderEmail: 'id@аpple.com', subject: 'Your Apple ID was locked', body: 'Your Apple ID has been locked for security reasons. Sign in to unlock your account.', links: [{ href: 'https://xn--pple-43d.com/unlock', text: 'Unlock' }] }, 'suspicious'],
     ['CEO gift card (content only)', { senderName: 'Mark (CEO)', senderEmail: 'mark.ceo.office@outlook.com', subject: 'Quick favor',
-      body: "Hi, Are you available? I need a favor. I'm in a meeting and can't talk. I need you to buy 5 gift cards for a client today, keep this confidential. Reply with the codes as soon as possible.", links: [] }, 'suspicious'],
+      body: "Hi, Are you available? I need a favor. I'm in a meeting and can't talk. I need you to buy 5 gift cards for a client today, keep this confidential. Reply with the codes as soon as possible.", links: [] }, 'phishing'],
     ['Link text mismatch only', { senderName: 'Billing', senderEmail: 'billing@smallshop.example', subject: 'Invoice', body: 'Please see your invoice.',
       links: [{ href: 'https://evil-login.example/x', text: 'https://www.chase.com/invoice' }] }, 'suspicious'],
     ['User-reported domain', { senderName: 'Bob', senderEmail: 'bob@scammy.example', subject: 'hi', body: 'hello there friend how are you', links: [] }, 'phishing', { blocked: new Set(['scammy.example']) }],
     ['Threat-listed link', { senderName: 'News', senderEmail: 'news@site.example', subject: 'Read', body: 'An article you might like to read today.', links: [{ href: 'https://bad.phish.example/a', text: 'Read more' }] }, 'phishing',
       T([['bad.phish.example', { cat: 'phishing', source: 'test list', matched: 'bad.phish.example' }]])],
     ['Display name contains other email', { senderName: 'support@paypal.com', senderEmail: 'x83@mailer.ru', subject: 'Receipt', body: 'Your payment details need to be updated. Update your payment now.', links: [] }, 'suspicious'],
+    // Direct requests: red even though no list confirms them.
+    ['Asks for email and password by reply', { senderName: 'Totally real person', senderEmail: 'someone@gmail.com', subject: 'Hello',
+      body: 'Hello, Please respond to this email with your email and password. Best, Totally real person', links: [] }, 'phishing'],
+    ['Asks for SSN', { senderName: 'HR Department', senderEmail: 'hr.payroll.dept@outlook.com', subject: 'Payroll update',
+      body: 'Hi, to keep receiving your paycheck please reply with your full social security number and date of birth.', links: [] }, 'phishing'],
+    ['Asks for the one-time code', { senderName: 'Sam', senderEmail: 'sam.k1982@yahoo.com', subject: 'oops',
+      body: 'I accidentally sent my verification code to your phone. Can you text me the code? What is your verification code?', links: [] }, 'phishing'],
+    ['Stranger demands money', { senderName: 'Grace', senderEmail: 'grace.help.2024@gmail.com', subject: 'Urgent help',
+      body: 'I am stuck abroad and lost my wallet. Please send me $500 through Western Union today, I will pay you back.', links: [] }, 'phishing'],
+    ['Bitcoin extortion', { senderName: 'Hacker', senderEmail: 'x@protonmail.com', subject: 'I recorded you',
+      body: 'I have access to your device. Send $1,200 in Bitcoin to the wallet below within 48 hours or I will share everything.', links: [] }, 'phishing'],
 
     // ---------- legitimate (false-positive traps) ----------
     ['Real Google security alert', { senderName: 'Google', senderEmail: 'no-reply@accounts.google.com', subject: 'Security alert',
@@ -38,6 +49,14 @@
     ['Apple pie recipe site', { senderName: 'Grandma', senderEmail: 'grandma@family.example', subject: 'Recipe', body: 'Here is the recipe I told you about, it is delicious and easy to make.', links: [{ href: 'https://apple-pie-recipes.example/classic', text: 'Classic apple pie' }] }, 'safe'],
     ['Company intranet office subdomain', { senderName: 'Facilities', senderEmail: 'facilities@mycompany.example', subject: 'Office closed Monday', body: 'The office will be closed Monday for the holiday. Enjoy the long weekend everyone.', links: [{ href: 'https://office.mycompany.example/calendar', text: 'Holiday calendar' }] }, 'safe'],
     ['Outlook safelink to real site', { senderName: 'Sarah Kim', senderEmail: 'sarah@acme.example', subject: 'Notes', body: 'Thanks for a great meeting today, notes are in the shared doc for review before Friday.', links: [{ href: 'https://nam12.safelinks.protection.outlook.com/?url=https%3A%2F%2Fdocs.google.com%2Fdocument%2Fd%2Fx&data=1', text: 'docs.google.com/document' }] }, 'safe'],
+    // Direct-request false-alarm traps: warnings, resets and everyday "send" wording are not requests for secrets.
+    ['Bank says never share your password', { senderName: 'Chase', senderEmail: 'no.reply.alerts@chase.com', subject: 'Protect yourself from scams',
+      body: 'We will never ask you to send your password, PIN or one-time code by email. Never share your card number with anyone who contacts you.', links: [{ href: 'https://www.chase.com/security', text: 'chase.com/security' }] }, 'safe'],
+    ['Reset page asks for a new password', { senderName: 'Dropbox', senderEmail: 'no-reply@dropbox.com', subject: 'Password reset',
+      body: 'Follow the link to enter your new password. If you didn\'t ask for this, ignore this email.', links: [{ href: 'https://www.dropbox.com/password_reset?token=abc', text: 'Reset password' }] }, 'safe'],
+    ['Coworker sends the slides', { senderName: 'Priya Shah', senderEmail: 'priya@acme.example', subject: 'Deck', body: 'Can you send me the slides from Tuesday and share your notes? Thanks!', links: [] }, 'safe'],
+    ['Known friend asks to be paid back', { senderName: 'Alex', senderEmail: 'alex.rivera@gmail.com', subject: 'Dinner', body: 'Fun night! Venmo me $25 for dinner when you get a chance.', links: [],
+      history: { mature: true, seenBefore: true } }, 'safe'],
     ['Bank statement ready (real chase)', { senderName: 'Chase', senderEmail: 'no.reply.alerts@chase.com', subject: 'Your statement is ready', body: 'Your credit card statement is available. Your payment is due on 11/28. Sign in to chase.com to view it.', links: [{ href: 'https://www.chase.com/statements', text: 'chase.com' }] }, 'safe'],
     ['Trusted sender overrides wording', { senderName: 'Dad', senderEmail: 'dad@family.example', subject: 'URGENT', body: 'Urgent! Please send me the bank account routing number immediately for the house payment.', links: [] }, 'safe', { trusted: new Set(['dad@family.example']) }],
     ['Lookup returned clean (null)', { senderName: 'News', senderEmail: 'news@site.example', subject: 'Read', body: 'An article you might like to read today.', links: [{ href: 'https://good.example/a', text: 'Read more' }] }, 'safe', T([['good.example', null]])],
@@ -48,7 +67,7 @@
       auth: { spf: 'pass', dkim: 'pass', dmarc: 'pass', dkimDomains: ['paypal.com'] } }, 'safe'],
     ['Real PayPal address, DMARC FAIL (forged From)', { senderName: 'PayPal', senderEmail: 'service@paypal.com', subject: 'Your account is limited',
       body: 'Your account has been limited. Confirm your password within 24 hours to restore access.', links: [{ href: 'https://www.paypal.com/myaccount', text: 'Log in' }],
-      auth: { spf: 'fail', dkim: 'none', dmarc: 'fail', dkimDomains: [] } }, 'suspicious'],
+      auth: { spf: 'fail', dkim: 'none', dmarc: 'fail', dkimDomains: [] } }, 'phishing'],
     ['Small business, SPF softfail only, no ask', { senderName: 'Rosa', senderEmail: 'rosa@bakery.example', subject: 'Order ready', body: 'Your cake order is ready for pickup on Saturday morning.', links: [],
       auth: { spf: 'softfail', dkim: 'none', dmarc: 'none', dkimDomains: [] } }, 'safe'],
     ['Trusted sender, but DMARC fail', { senderName: 'Dad', senderEmail: 'dad@family.example', subject: 'Send money', body: 'Please wire transfer the money today for the house payment, it is urgent.', links: [],
@@ -74,7 +93,7 @@
     // ---------- sender history ----------
     ['Familiar name from a new address asking for gift cards', { senderName: 'Mark Davis', senderEmail: 'mark.davis.ceo@gmail.com', subject: 'Quick task',
       body: 'Can you pick up some gift cards for a client today? Keep this between us.', links: [],
-      history: { seenBefore: false, mature: true, nameKnownElsewhere: true } }, 'suspicious'],
+      history: { seenBefore: false, mature: true, nameKnownElsewhere: true } }, 'phishing'],
     ['First-time sender, harmless note', { senderName: 'New Neighbour', senderEmail: 'lee@neighbours.example', subject: 'Hello', body: 'Hi, we just moved in next door. Come over for coffee sometime!', links: [],
       history: { seenBefore: false, mature: true, nameKnownElsewhere: false } }, 'safe'],
 
@@ -94,7 +113,7 @@
     body: `Hello, please note our bank details have changed. Kindly remit the outstanding invoice to the new account below. IBAN: ${VALID_IBAN}. Thank you.`, links: [] }, 'suspicious']);
   EMAILS.push(['Hijacked thread: look-alike reply changes the account', { senderName: 'Dana Reyes', senderEmail: 'dana@northwlnd-supplies.example', subject: 'Re: Invoice 4471',
     body: `Hi, quick update before you pay: we have changed banks. Please send the payment to the new account: ${VALID_IBAN}.`, links: [],
-    thread: { senders: ['dana@northwind-supplies.example', 'me@mycompany.example'] } }, 'suspicious']);
+    thread: { senders: ['dana@northwind-supplies.example', 'me@mycompany.example'] } }, 'phishing']);
   EMAILS.push(['Known supplier, same bank details as always', { senderName: 'Accounts', senderEmail: 'accounts@northwind-supplies.example', subject: 'Invoice 4502',
     body: `Please find invoice 4502 attached. Payment to our usual account ${VALID_IBAN} within 30 days.`, links: [],
     history: { seenBefore: true, mature: true, knownDomain: true } }, 'safe']);
