@@ -99,7 +99,10 @@
     'braze.com', 'sparkpostmail.com', 'awstrack.me', 'mlsend.com', 'substack.com', 'mailjet.com', 'sendibt3.com',
     'sendinblue.com', 'brevo.com', 'constantcontact.com', 'marketo.com', 'mktoweb.com', 'mkt.com', 'pardot.com',
     'salesforce.com', 'iterable.com', 'customer.io', 'convertkit-mail.com', 'ck.page', 'beehiiv.com', 'medallia.com',
-    'urldefense.com', 'mimecast.com', 'protection.outlook.com', 'linkedin.com', 'google.com'];
+    'urldefense.com', 'mimecast.com', 'protection.outlook.com', 'linkedin.com'];
+  // google.com used to be listed here, which meant phishing pages hosted on Google Sites, Docs and Forms
+  // (sites.google.com, docs.google.com/forms) were never checked for "link text says paypal.com" tricks.
+  // Google's own redirect (google.com/url?q=) is unwrapped by the analyzer instead.
 
   // Multi-part public suffixes so "evil.co.uk" -> registrable "evil.co.uk", not "co.uk".
   const MULTI_SUFFIXES = ['co.uk', 'org.uk', 'gov.uk', 'ac.uk', 'me.uk', 'ltd.uk', 'com.au', 'net.au', 'org.au',
@@ -164,7 +167,7 @@
     'account (?:is )?(?:currently )?(?:under|being) (?:audit|review|maintenance)',
   ];
 
-  const RISKY_ATTACHMENT = /\b[\w\- ]{1,60}\.(exe|scr|js|jse|vbs|vbe|bat|cmd|com|pif|msi|iso|img|hta|wsf|lnk|jar|ps1|docm|xlsm|pptm|html?|shtml)\b/i;
+  const RISKY_ATTACHMENT = /\b[\w\- ]{1,60}\.(exe|scr|js|jse|vbs|vbe|bat|cmd|com|pif|msi|iso|img|vhdx?|hta|wsf|lnk|jar|ps1|docm|xlsm|pptm|html?|shtml|one|xll|iqy|slk)\b/i;
 
   // A tiny built-in list used by the demo inbox and the tests. The real list (~190k entries) is data/threat-intel.bin,
   // kept up to date by the background worker; the user's own reports are a separate list in storage.

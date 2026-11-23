@@ -20,6 +20,13 @@ for (const [name, input, expected, lists] of C.EMAILS) {
   });
 }
 
+for (const [name, input, id] of C.SIGNALS) {
+  test(`signal: ${name} -> ${id}`, () => {
+    const r = A.analyzeEmail(Object.assign({ context: 'open' }, input), {});
+    assert.ok(r.signals.some((s) => s.id === id), `missing ${id}: ${describe(r)}`);
+  });
+}
+
 for (const [url, bad] of C.URLS) {
   test(`url: ${url}`, () => {
     const r = A.analyzeUrl(url, {});

@@ -1,10 +1,23 @@
 # Changelog
 
 ## Unreleased
+### Red and yellow
 - **Red for direct requests.** An email that asks you to send a password, security code or personal details (an SSN, card or bank number, date of birth...) is now red, even when no threat list knows the sender. So is an email telling you to send money, gift cards or cryptocurrency, unless it comes from someone you trust, a brand address that passed authentication, or someone you've emailed with before. Warnings such as "we will never ask for your password" don't count.
 - **Look-alike company addresses are red.** A sender address that misspells the company the email names (`support@menrds.com` from "Menards", `billing@hartwe1llumber.com` from "Hartwell Lumber") is flagged even for companies Tripwire has never heard of. Look-alikes of known brands and of people you email with are now red too. 18 more brands were added to the built-in list (The Home Depot, Lowe's, Menards, Target, Costco, Best Buy, Verizon, AT&T, T-Mobile, Xfinity, Instagram, WhatsApp, TikTok, Norton, McAfee, Hulu, Disney+).
 - **"Not sure this is the official address."** When the sender's domain contains the company's full name plus something else (`hartwelllumbermail.com` for "Hartwell Lumber"), Tripwire can't tell if it's real, so the email is yellow and the Summary says so, with an **I know this sender** button. Clicking it remembers the domain on this device (listed in the popup under "Sender addresses you know", where it can be removed) and re-checks the email. Later emails from that domain are no longer questioned about who sent them, but their contents (requests for passwords, links, attachments...) are still checked in full.
 - **Red for strong signs of a scam.** Emails whose warning signs add up to a score below 35 (what used to be the yellow "Very suspicious") are now red. Yellow is kept for milder warning signs.
+
+### Detection fixes (each of these emails used to pass as safe)
+- **Forged sender passed as verified.** Comments in `Authentication-Results`, such as Gmail's copy of an upstream ARC seal (`arc=pass (… dmarc=pass …)`), were read as real results. A forged PayPal email with `dmarc=fail` could count as a proven PayPal address. Comments are now ignored.
+- **Links behind Proofpoint URL Defense** (`urldefense.com` v1/v2/v3) were never checked, because every link looked like a harmless urldefense link. They're now unwrapped. LinkedIn `/redir/redirect`, YouTube `/redirect` and `l.instagram.com` links are unwrapped as well.
+- **Phishing on Google Sites, Docs and Forms.** `google.com` was on the tracking-service list, so "link says paypal.com but goes to sites.google.com" was never flagged.
+- **Curly apostrophes and invisible characters** (`I’m in a meeting`, `You’ve won`, `pass​word`) stopped the wording checks from matching.
+- **Look-alike links in international characters** (`xn--pple-43d.com`, shown as "аpple.com") are now recognised as fake Apple sites, not just "unusual characters".
+- **UPS, IRS, DHL and AWS** were skipped in "pretends to be from" checks because the names are only 3 letters. They now count when written in capitals.
+- **Display names** "Microsoft Outlook", "Apple iCloud" and names with Cyrillic look-alike letters ("PаyPal") now count as brand claims.
+- **QR codes** holding a bare domain (`evil.example`, no `https://` or path) are now checked.
+- **Attachments:** OneNote (`.one`), Excel add-ins (`.xll`), `.iqy`, `.slk`, `.appref-ms`, `.library-ms`, `.search-ms` and similar delivery formats are now flagged as programs.
+- 22 regression tests added (`test/cases.js`).
 
 ## 1.4.1 (2026-11-20)
 - **Fix: sender authentication on live Gmail.** Gmail keeps the message ID one level above where Tripwire looked, so "Show original" was never fetched, and real brand mail showed "not verified" instead of "✓ verified". Found by checking Tripwire on a real Gmail account. The headers are now also read as plain text, which works with Gmail's Trusted Types security policy.
