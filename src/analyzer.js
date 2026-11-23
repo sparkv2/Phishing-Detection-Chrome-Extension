@@ -109,6 +109,9 @@
     return D.MULTI_SUFFIXES.includes(last2) ? parts.slice(0, -2).join('.') : parts.slice(0, -1).join('.');
   }
   function tld(host) { const p = lc(host).split('.'); return p[p.length - 1]; }
+  // A shared mailbox service (gmail.com, icloud.com, Apple's privaterelay.appleid.com relay...): each address
+  // belongs to a different person, so the domain says nothing about who sent the email.
+  function isSharedMail(host) { host = lc(host); return D.FREE_MAIL.includes(host) || D.FREE_MAIL.includes(registrableDomain(host)); }
   // IPv4 (1.2.3.4) or IPv6 ([2001:db8::1]) literal instead of a name.
   function isIP(host) { return /^\d{1,3}(\.\d{1,3}){3}$/.test(host) || (/^\[?[0-9a-f:]+\]?$/i.test(host) && host.includes(':')); }
   // Is `host` one of `domains`, or a subdomain of one? (mail.paypal.com matches paypal.com; paypal.com.evil.ru doesn't.)
@@ -228,7 +231,7 @@
     const domain = lc(sender.domain);
     if (!domain || isIP(domain) || brandOfDomain(domain)) return null;
     const reg = registrableDomain(domain);
-    if (D.FREE_MAIL.includes(reg)) return null;
+    if (isSharedMail(domain)) return null;
     const label = domainLabel(reg).replace(/[-_]/g, '');
     const norm = normalizeHomoglyphs(label);
     if (label.length < 4) return null;
@@ -257,7 +260,7 @@
     const domain = lc(sender.domain);
     if (!domain || isIP(domain) || brandOfDomain(domain)) return null;
     const reg = registrableDomain(domain);
-    if (D.FREE_MAIL.includes(reg)) return null;
+    if (isSharedMail(domain)) return null;
     const label = normalizeHomoglyphs(domainLabel(reg).replace(/[-_]/g, ''));
     const fromName = nameClaims(sender.name, sender.email);
     const fromText = textClaims((subject || '') + '\n' + (body || ''));
@@ -696,7 +699,7 @@
     const ctx = { senderBrand: null, verifiedBrand: false, free: false, auth: 'unknown' };
     if (!domain) return { signals, ctx }; // the page didn't show an address: nothing to check
     const reg = registrableDomain(domain);
-    ctx.free = D.FREE_MAIL.includes(reg) || D.FREE_MAIL.includes(domain);
+    ctx.free = isSharedMail(domain);
 
     // On a list? (A reported single address, e.g. a gmail.com scammer, is checked by full address.)
     const senderThreat = (lists.blocked && lists.blocked.has(email)) ? { cat: 'reported', source: 'your reports' } : knownThreat(domain, lists);
@@ -1007,14 +1010,14 @@
     const reg = registrableDomain(domain);
     const label = domainLabel(reg), suffix = reg.slice(label.length + 1);
     const domains = new Set();
-    if (!D.FREE_MAIL.includes(reg) && label.length >= 3 && label.length <= 40) {
+    if (!isSharedMail(domain) && label.length >= 3 && label.length <= 40) {
       for (const v of editVariants(label)) if (/^[a-z0-9]/.test(v) && v.length >= 2) domains.add(v + '.' + suffix);
       for (const t of COMMON_TLDS) domains.add(label + '.' + t);
       domains.delete(reg);
     }
     // Free-mail lookalikes copy the person instead: john.smith@gmail.com -> johnsmith@ or john.smlth@gmail.com
     const addresses = new Set();
-    if (D.FREE_MAIL.includes(reg) && local && local.length <= 40) {
+    if (isSharedMail(domain) && local && local.length <= 40) {
       for (const v of editVariants(local)) if (v) addresses.add(v + '@' + domain);
       addresses.add(local.replace(/\./g, '') + '@' + domain);
       addresses.delete(email);
@@ -1383,5 +1386,5 @@
 
   // Exported for the content script, background worker, page guard, server and tests.
   root.PG_Analyzer = { analyzeEmail, analyzeUrl, analyzeLink, analyzeAttachments, registrableDomain, lookalikeBrand, unwrapUrl, summarize,
-    parseSender, parseAuthResults, authVerdict, findBankDetails, findDirectRequests, lookalikeCandidates, looksLike, parseMime, inspectRawMessage, decodeWords };
+    parseSender, parseAuthResults, authVerdict, findBankDetails, findDirectRequests, isSharedMail, lookalikeCandidates, looksLike, parseMime, inspectRawMessage, decodeWords };
 })(typeof globalThis !== 'undefined' ? globalThis : this);

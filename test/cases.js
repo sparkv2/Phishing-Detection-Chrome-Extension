@@ -56,6 +56,11 @@
       body: 'Your invoice for the deck boards is attached. Thanks for your business.', links: [] }, 'safe', { knownDomains: new Set(['hartwelllumbermail.com']) }],
     ['Known domain still has its contents checked', { senderName: 'Hartwell Lumber', senderEmail: 'billing@hartwelllumbermail.com', subject: 'Account',
       body: 'Please reply with your password so we can update your account.', links: [] }, 'phishing', { knownDomains: new Set(['hartwelllumbermail.com']) }],
+    // ...but what a relay address says is still checked.
+    ['Hide My Email relay asks for a password', { senderName: 'Unknown', senderEmail: 'zz9qq8@privaterelay.appleid.com', subject: 'Account',
+      body: 'Please reply with your password so I can fix your account.', links: [] }, 'phishing'],
+    ['Hide My Email relay claiming to be Apple', { senderName: 'Apple', senderEmail: 'x1y2z3@privaterelay.appleid.com', subject: 'Your Apple ID',
+      body: 'Your Apple ID was locked. Sign in to verify your account.', links: [] }, ['suspicious', 'phishing']],
     ['Stranger demands money', { senderName: 'Grace', senderEmail: 'grace.help.2024@gmail.com', subject: 'Urgent help',
       body: 'I am stuck abroad and lost my wallet. Please send me $500 through Western Union today, I will pay you back.', links: [] }, 'phishing'],
     ['Bitcoin extortion', { senderName: 'Hacker', senderEmail: 'x@protonmail.com', subject: 'I recorded you',
@@ -87,6 +92,11 @@
     ['Person with their own domain spelled differently', { senderName: 'Jon Smith', senderEmail: 'jon@johnsmith.com', subject: 'Photos', body: 'Here are the photos from Saturday.', links: [] }, 'safe'],
     ['Company mentions a similar word', { senderName: 'Stripe', senderEmail: 'receipts@stripe.com', subject: 'Receipt', body: 'Thanks for your purchase from Stars and Stripes Diner via Stripe.', links: [] }, 'safe'],
     ['Newsletter domain differs from a capitalised word', { senderName: 'Morning Brew', senderEmail: 'crew@morningbrew.com', subject: 'Today', body: 'Markets rallied. Brewers fans celebrated. Morning Brew has the rest.', links: [] }, 'safe'],
+    // Apple's Hide My Email relay is a real Apple service used by many different people: not a fake Apple domain.
+    ['Hide My Email relay, ordinary message', { senderName: 'Jordan Lee', senderEmail: 'g7x2k9pq4m@privaterelay.appleid.com', subject: 'Question about the bike',
+      body: 'Hi, is the bike still for sale? I can pick it up Saturday.', links: [] }, 'safe'],
+    ['Hide My Email relay, thank-you note', { senderName: 'Etsy Buyer', senderEmail: 'abc123def@privaterelay.appleid.com', subject: 'Order',
+      body: 'Thanks for shipping my order so quickly!', links: [] }, 'safe'],
     ['Bank statement ready (real chase)', { senderName: 'Chase', senderEmail: 'no.reply.alerts@chase.com', subject: 'Your statement is ready', body: 'Your credit card statement is available. Your payment is due on 11/28. Sign in to chase.com to view it.', links: [{ href: 'https://www.chase.com/statements', text: 'chase.com' }] }, 'safe'],
     ['Trusted sender overrides wording', { senderName: 'Dad', senderEmail: 'dad@family.example', subject: 'URGENT', body: 'Urgent! Please send me the bank account routing number immediately for the house payment.', links: [] }, 'safe', { trusted: new Set(['dad@family.example']) }],
     ['Lookup returned clean (null)', { senderName: 'News', senderEmail: 'news@site.example', subject: 'Read', body: 'An article you might like to read today.', links: [{ href: 'https://good.example/a', text: 'Read more' }] }, 'safe', T([['good.example', null]])],

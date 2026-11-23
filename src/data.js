@@ -12,7 +12,7 @@
   // `domains` are the registrable domains the brand really sends mail and hosts links from.
   const BRANDS = [
     { name: 'PayPal', keywords: ['paypal'], domains: ['paypal.com', 'paypal.me', 'paypal-communication.com', 'paypalobjects.com'] },
-    { name: 'Apple', keywords: ['apple', 'icloud', 'itunes', 'apple id'], domains: ['apple.com', 'icloud.com', 'me.com', 'itunes.com', 'apple.news'] },
+    { name: 'Apple', keywords: ['apple', 'icloud', 'itunes', 'apple id'], domains: ['apple.com', 'icloud.com', 'me.com', 'itunes.com', 'apple.news', 'appleid.com'] },
     { name: 'Microsoft', keywords: ['microsoft', 'office 365', 'office365', 'outlook', 'onedrive', 'microsoft 365', 'xbox'], domains: ['microsoft.com', 'office.com', 'office365.com', 'microsoftonline.com', 'live.com', 'outlook.com', 'onedrive.com', 'sharepoint.com', 'xbox.com', 'microsoft365.com', 'msn.com', 'azure.com'] },
     { name: 'Google', keywords: ['google', 'gmail', 'google drive', 'youtube'], domains: ['google.com', 'youtube.com', 'googlemail.com', 'gmail.com', 'goo.gl', 'googleusercontent.com', 'withgoogle.com', 'google.co.uk'] },
     { name: 'Amazon', keywords: ['amazon', 'amazon prime', 'prime video', 'aws'], domains: ['amazon.com', 'amazon.co.uk', 'amazon.ca', 'amazon.de', 'amazon.in', 'amazon.com.au', 'amazon.fr', 'amazon.co.jp', 'amazonaws.com', 'aws.com', 'amzn.to', 'primevideo.com', 'a.co'] },
@@ -81,7 +81,10 @@
 
   const FREE_MAIL = ['gmail.com', 'googlemail.com', 'yahoo.com', 'ymail.com', 'outlook.com', 'hotmail.com', 'live.com',
     'msn.com', 'aol.com', 'icloud.com', 'me.com', 'mac.com', 'proton.me', 'protonmail.com', 'gmx.com', 'gmx.net',
-    'mail.com', 'yandex.com', 'yandex.ru', 'zoho.com', 'tutanota.com', 'mail.ru', 'qq.com', '163.com', 'inbox.com'];
+    'mail.com', 'yandex.com', 'yandex.ru', 'zoho.com', 'tutanota.com', 'mail.ru', 'qq.com', '163.com', 'inbox.com',
+    // Apple's "Hide My Email" relay: a real Apple service, but the person behind each address is whoever uses it,
+    // like a free mail account. Not a fake Apple domain, and not Apple itself.
+    'privaterelay.appleid.com'];
 
   // TLDs that are cheap/free and disproportionately used for phishing. Mild signal only.
   const SUSPICIOUS_TLDS = ['zip', 'mov', 'xyz', 'top', 'click', 'link', 'gq', 'tk', 'ml', 'cf', 'ga', 'work', 'rest',

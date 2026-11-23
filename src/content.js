@@ -147,7 +147,7 @@
     const h = await loadHistory();
     h.domains = h.domains || {};
     const reg = A.registrableDomain(email.split('@').pop());
-    const free = D.FREE_MAIL.includes(reg);
+    const free = A.isSharedMail(email.split('@').pop());
     const sh = await hash('s:' + email), mk = (await hash('m:' + msgKey)).slice(0, 8);
     const dh = await hash('d:' + reg);
     const pn = personName(senderName);
@@ -533,7 +533,7 @@
   async function report(sender, verifiedBrand) {
     if (!sender.email) return;
     const dom = sender.domain;
-    const freeOrBrand = verifiedBrand || D.FREE_MAIL.includes(A.registrableDomain(dom));
+    const freeOrBrand = verifiedBrand || A.isSharedMail(dom);
     // Block the whole fake domain, but only the single address if it's a shared provider like gmail.com
     await updateList('blocked', freeOrBrand ? sender.email : A.registrableDomain(dom), true);
     // If the user opted in, share a fingerprint of the fake domain (never for shared providers like gmail.com).
