@@ -1,0 +1,11 @@
+[Unit]
+Description=Fetch the signed Tripwire threat list every hour (GitHub Actions publishes a new one every 6 hours)
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=1h
+RandomizedDelaySec=5min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

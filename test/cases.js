@@ -22,7 +22,8 @@
     ['Link text mismatch only', { senderName: 'Billing', senderEmail: 'billing@smallshop.example', subject: 'Invoice', body: 'Please see your invoice.',
       links: [{ href: 'https://evil-login.example/x', text: 'https://www.chase.com/invoice' }] }, 'suspicious'],
     ['User-reported domain', { senderName: 'Bob', senderEmail: 'bob@scammy.example', subject: 'hi', body: 'hello there friend how are you', links: [] }, 'phishing', { blocked: new Set(['scammy.example']) }],
-    ['Feed-listed link', { senderName: 'News', senderEmail: 'news@site.example', subject: 'Read', body: 'An article you might like to read today.', links: [{ href: 'https://bad.phish.example/a', text: 'Read more' }] }, 'phishing', { feed: new Set(['bad.phish.example']) }],
+    ['Threat-listed link', { senderName: 'News', senderEmail: 'news@site.example', subject: 'Read', body: 'An article you might like to read today.', links: [{ href: 'https://bad.phish.example/a', text: 'Read more' }] }, 'phishing',
+      T([['bad.phish.example', { cat: 'phishing', source: 'test list', matched: 'bad.phish.example' }]])],
     ['Display name contains other email', { senderName: 'support@paypal.com', senderEmail: 'x83@mailer.ru', subject: 'Receipt', body: 'Your payment details need to be updated. Update your payment now.', links: [] }, 'suspicious'],
 
     // ---------- legitimate (false-positive traps) ----------
@@ -116,6 +117,33 @@
     ['Google Forms page behind "Log in to PayPal"', Object.assign({}, RB, { links: [{ href: 'https://docs.google.com/forms/d/e/abc/viewform', text: 'Log in to PayPal' }] }), 'brand-text-link'],
     ['UPS link text going elsewhere', Object.assign({}, RB, { links: [{ href: 'https://release-parcel.example/pay', text: 'Pay the UPS fee' }] }), 'brand-text-link'],
   ];
+
+  // ---------- payment changes & reply-chain hijack ----------
+  const VALID_IBAN = 'GB82 WEST 1234 5698 7654 32';
+  EMAILS.push(['Supplier says bank details changed', { senderName: 'Accounts', senderEmail: 'accounts@northwind-supplies.example', subject: 'Updated remittance details',
+    body: `Hello, please note our bank details have changed. Kindly remit the outstanding invoice to the new account below. IBAN: ${VALID_IBAN}. Thank you.`, links: [] }, 'suspicious']);
+  EMAILS.push(['Hijacked thread: look-alike reply changes the account', { senderName: 'Dana Reyes', senderEmail: 'dana@northwlnd-supplies.example', subject: 'Re: Invoice 4471',
+    body: `Hi, quick update before you pay: we have changed banks. Please send the payment to the new account: ${VALID_IBAN}.`, links: [],
+    thread: { senders: ['dana@northwind-supplies.example', 'me@mycompany.example'] } }, 'suspicious']);
+  EMAILS.push(['Known supplier, same bank details as always', { senderName: 'Accounts', senderEmail: 'accounts@northwind-supplies.example', subject: 'Invoice 4502',
+    body: `Please find invoice 4502 attached. Payment to our usual account ${VALID_IBAN} within 30 days.`, links: [],
+    history: { seenBefore: true, mature: true, knownDomain: true } }, 'safe']);
+  EMAILS.push(['Known supplier, but different bank details than before', { senderName: 'Accounts', senderEmail: 'accounts@northwind-supplies.example', subject: 'Invoice 4503',
+    body: `Please find invoice 4503 attached. Payment to ${VALID_IBAN} within 30 days.`, links: [],
+    history: { seenBefore: true, mature: true, knownDomain: true, bankChanged: true, bankChangedDomain: 'northwind-supplies.example' } }, 'suspicious']);
+  EMAILS.push(['Imitates a supplier you correspond with (hashed history match)', { senderName: 'Northwind Accounts', senderEmail: 'billing@northwind-supplies.co', subject: 'Invoice overdue',
+    body: 'Your invoice is overdue. Please arrange payment today.', links: [],
+    history: { seenBefore: false, mature: true, lookalikeOf: 'northwind-supplies.example' } }, 'suspicious']);
+  EMAILS.push(['New company joins a thread, harmless note', { senderName: 'Sam Lee', senderEmail: 'sam@partner-agency.example', subject: 'Re: Launch plan',
+    body: 'Thanks for looping me in, happy to help with the launch next week.', links: [],
+    thread: { senders: ['priya@mycompany.example'] } }, 'safe']);
+
+  // Community reports are yellow, never red.
+  EMAILS.push(['Link to a community-reported domain', { senderName: 'Shop', senderEmail: 'deals@shop.example', subject: 'Sale', body: 'Our autumn sale is on now.',
+    links: [{ href: 'https://reported-by-users.example/sale', text: 'Shop now' }] }, 'suspicious',
+    T([['reported-by-users.example', { cat: 'community', source: 'Tripwire community reports', threshold: 3, matched: 'reported-by-users.example' }]])]);
+  EMAILS.push(['Sender domain reported by the community', { senderName: 'Accounts', senderEmail: 'billing@reported-sender.example', subject: 'Invoice', body: 'Please see the invoice for this month.', links: [] },
+    'suspicious', T([['reported-sender.example', { cat: 'community', source: 'Tripwire community reports', threshold: 3, matched: 'reported-sender.example' }]])]);
 
   // [url, expected to have any warning]
   const URLS = [['https://paypal.com.secure-login.ru/x', true], ['https://www.paypal.com/signin', false], ['https://micros0ft.com', true],

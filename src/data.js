@@ -1,4 +1,10 @@
-// Reference data used by the analyzer. Everything here is local — nothing is fetched at scan time.
+// =====================================================================================================================
+// Reference data (data.js)
+//
+// The word lists and domain lists the analyzer (analyzer.js) checks emails against. Everything here ships with the
+// extension; nothing is fetched while scanning. To teach Tripwire about a new brand, scam phrase or free-mail
+// provider, this is the file to edit (then run `npm test`).
+// =====================================================================================================================
 (function (root) {
   'use strict';
 
@@ -52,7 +58,7 @@
   const PHISH_DOMAIN_WORDS = ['secure', 'security', 'login', 'signin', 'verify', 'verification', 'account', 'accounts',
     'support', 'help', 'service', 'services', 'update', 'billing', 'alert', 'confirm', 'auth', 'online', 'customer',
     'recovery', 'unlock', 'wallet', 'pay', 'payment', 'id', 'web', 'app', 'center', 'team', 'access', 'portal', 'official',
-    'alerts', 'notice', 'check', 'mail', 'info', 'refund', 'reset', 'password', 'locked', 'safe', 'auth', 'sso', 'bill',
+    'alerts', 'notice', 'check', 'mail', 'info', 'refund', 'reset', 'password', 'locked', 'safe', 'sso', 'bill',
     'delivery', 'redelivery', 'tracking', 'track', 'parcel', 'shipping', 'package', 'fee', 'tax', 'gov', 'bank'];
 
   const FREE_MAIL = ['gmail.com', 'googlemail.com', 'yahoo.com', 'ymail.com', 'outlook.com', 'hotmail.com', 'live.com',
@@ -130,13 +136,26 @@
     ],
   };
 
+  // Requests to send money somewhere new: the core of invoice and supplier fraud ("business email compromise").
+  const PAYMENT_CHANGE = [
+    'new (?:bank(?:ing)?|payment|remittance|wire) (?:details|account|information|instructions)',
+    '(?:changed|updated|amended|different|new) (?:our |my )?(?:bank(?:ing)?|payment|remittance|wire|account) (?:details|account|information|instructions)',
+    '(?:bank(?:ing)?|account|payment|remittance) (?:details|information|instructions) (?:have|has) (?:been |now )?(?:changed|updated|amended)',
+    'we (?:have|\'ve) (?:changed|switched|moved) (?:our )?banks?',
+    '(?:please )?(?:update|amend|change) (?:our|the|your records with our) (?:bank(?:ing)?|payment|account|remittance) (?:details|information)',
+    '(?:pay|remit|send|transfer|wire) (?:the |all |this |future |any |outstanding )?(?:payments?|invoices?|funds|amount|balance) (?:in)?to (?:the|our|this) (?:new|following|below|updated|attached) (?:bank )?account',
+    '(?:old|previous|usual|former) (?:bank )?account (?:is|has been|was) (?:closed|frozen|suspended|blocked|under (?:audit|review))',
+    'do not (?:pay|send|transfer) (?:in)?to (?:the |our )?(?:old|previous|usual) account',
+    'account (?:is )?(?:currently )?(?:under|being) (?:audit|review|maintenance)',
+  ];
+
   const RISKY_ATTACHMENT = /\b[\w\- ]{1,60}\.(exe|scr|js|jse|vbs|vbe|bat|cmd|com|pif|msi|iso|img|vhdx?|hta|wsf|lnk|jar|ps1|docm|xlsm|pptm|html?|shtml|one|xll|iqy|slk)\b/i;
 
-  // Tiny built-in list for demos & tests. The real list is downloaded from OpenPhish by the background worker
-  // and compared locally. Users' own reports are added to a separate local list.
+  // A tiny built-in list used by the demo inbox and the tests. The real list (~190k entries) is data/threat-intel.bin,
+  // kept up to date by the background worker; the user's own reports are a separate list in storage.
   const BUILTIN_BLOCKLIST = ['paypa1-security.com', 'appleid-verify-account.com', 'micros0ft-login.net',
     'secure-chase-alerts.com', 'amaz0n-billing.com', 'netflix-payment-update.top'];
 
   root.PG_DATA = { BRANDS, SERVICE_WORDS, PHISH_DOMAIN_WORDS, FREE_MAIL, SUSPICIOUS_TLDS, SHORTENERS,
-    TRACKING_DOMAINS, MULTI_SUFFIXES, PHRASES, RISKY_ATTACHMENT, BUILTIN_BLOCKLIST };
+    TRACKING_DOMAINS, MULTI_SUFFIXES, PHRASES, PAYMENT_CHANGE, RISKY_ATTACHMENT, BUILTIN_BLOCKLIST };
 })(typeof globalThis !== 'undefined' ? globalThis : this);

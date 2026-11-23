@@ -1,8 +1,18 @@
-// On-page UI: summary/score banner, click-warning dialog, and link hover tooltip.
-// Rendered inside Shadow DOM so the email site's styles can't break it (and ours can't break the site).
+// =====================================================================================================================
+// On-page UI (ui.js)
+//
+// Everything Tripwire draws inside the webmail page:
+//   renderBanner   the card above an opened email: verdict, score meter, summary, reasons, advice, buttons
+//   confirmLink    the "Wait, check this link first" dialog shown before a risky link opens
+//   showTooltip    the small "this link really goes to..." label shown on hover
+// Each is rendered inside a Shadow DOM, so the email site's styles can't break it (and ours can't break the site).
+// Text is always added with createTextNode / textContent, never as HTML, so nothing from an email can inject markup.
+// =====================================================================================================================
 (function (root) {
   'use strict';
 
+  // Tiny element builder: h('div', { class: 'x', onclick: fn }, child, 'text', [more children]).
+  // `on*` attributes become event listeners; strings become text nodes (never parsed as HTML).
   function h(tag, attrs, ...children) {
     const el = document.createElement(tag);
     for (const [k, v] of Object.entries(attrs || {})) {
@@ -15,6 +25,7 @@
     return el;
   }
 
+  // Styles shared by all three pieces of UI. Colours come from the level class: --c (accent) and --bg (header tint).
   const CSS = `
   :host { all: initial; }
   * { box-sizing: border-box; }
@@ -52,6 +63,12 @@
   .ev { display: inline-block; margin-top: 4px; font: 12px/1.4 ui-monospace, Consolas, monospace; background: #fff;
     border: 1px solid #d0d7de; border-radius: 4px; padding: 1px 6px; word-break: break-all; }
   .more { background: none; border: 0; color: #0969da; cursor: pointer; padding: 4px 0; font: inherit; }
+  .evrow { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 4px; }
+  .evrow .ev { margin-top: 0; }
+  button.show { font: 600 12px/1 -apple-system, "Segoe UI", Roboto, Arial, sans-serif; padding: 5px 9px; border-radius: 999px; cursor: pointer;
+    border: 1px solid var(--c); background: #fff; color: var(--c); }
+  button.show:hover { background: var(--bg); }
+  button.show:focus-visible { outline: 2px solid #0969da; outline-offset: 2px; }
   .actions { display: flex; flex-wrap: wrap; gap: 8px; padding: 10px 16px 12px; border-top: 1px solid #eaeef2; }
   button.btn { font: 600 13px/1 inherit; font-family: inherit; padding: 9px 14px; border-radius: 6px; cursor: pointer;
     border: 1px solid #d0d7de; background: #f6f8fa; color: #1f2328; }
@@ -88,6 +105,8 @@
     '<line x1="10" y1="64" x2="118" y2="64" stroke="#E24B4A" stroke-width="7" stroke-linecap="round"/>' +
     '<circle cx="10" cy="64" r="8" fill="#E24B4A"/><circle cx="118" cy="64" r="8" fill="#E24B4A"/><circle cx="64" cy="64" r="10" fill="#E24B4A"/></svg>';
 
+  // A host element with an open shadow root holding our styles. `data-pg-ui` lets the content script ignore page
+  // changes inside our own UI (otherwise drawing the banner would trigger another scan).
   function shadowHost(tag) {
     const host = document.createElement(tag || 'div');
     host.setAttribute('data-pg-ui', '');
@@ -96,6 +115,8 @@
     return { host, sr };
   }
 
+  // ---------- banner wording ----------
+  // Headline per verdict. Known threats get a headline per threat type; "very suspicious" (score < 35) its own.
   const LEVEL_TEXT = {
     safe: { icon: '✓', title: 'No warning signs found', sub: 'This email passed our checks. Stay alert anyway.' },
     suspicious: { icon: '!', title: 'Be careful — this email looks suspicious', sub: 'Some warning signs were found. Read the reasons below before you act.' },
@@ -110,6 +131,8 @@
   const HIGH_TEXT = { icon: '!', title: 'Very suspicious — strong signs of phishing',
     sub: 'Not on a known-scam list yet, but it has serious warning signs. Don\'t click links, open attachments, or reply.' };
 
+  // General advice per level ("safe" shows one random good habit). Advice specific to this email (result.tips)
+  // is shown before these.
   const TIPS = {
     phishing: [
       'Don\'t click any links or open any attachments in this email.',
@@ -133,6 +156,10 @@
     ],
   };
 
+  // ---------- the banner ----------
+  // result: the analyzer's verdict. opts: { reportHelp, pending: [checks still running], onReport, onShow, onTrust,
+  // onUntrust } (callbacks from the content script). Returns the host element to insert above the email.
+  // Sections, top to bottom: header (headline + score), meter, Summary, Why (or "What we checked"), advice, buttons.
   function renderBanner(result, opts) {
     const { host, sr } = shadowHost('div');
     host.className = 'pg-banner-host';
@@ -167,8 +194,18 @@
     // Why
     if (result.level !== 'safe' && result.signals.length) {
       const why = h('section', {}, h('h4', {}, result.level === 'phishing' ? 'Why this is dangerous' : 'Why this is suspicious'));
+      const showBtn = (x) => {
+        if (!x.target || !opts.onShow) return null;
+        const b = h('button', { class: 'show', type: 'button', title: 'Scroll to and highlight this in the email' }, 'Show me');
+        b.addEventListener('click', () => {
+          const n = opts.onShow(x);
+          b.textContent = n ? 'Shown ✓' : 'Not visible on the page';
+          setTimeout(() => { b.textContent = 'Show me'; }, 2500);
+        });
+        return b;
+      };
       const items = result.signals.map((x) => h('div', { class: 'reason' }, h('b', {}, x.title), x.explain,
-        x.evidence ? h('div', {}, h('span', { class: 'ev' }, x.evidence)) : null));
+        (x.evidence || x.target) ? h('div', { class: 'evrow' }, x.evidence ? h('span', { class: 'ev' }, x.evidence) : null, showBtn(x)) : null));
       items.slice(0, 4).forEach((i) => why.append(i));
       if (items.length > 4) {
         const rest = h('div', { hidden: true }, items.slice(4));
@@ -186,7 +223,8 @@
     }
 
     // What to do
-    const tips = result.level === 'safe' ? [TIPS.safe[Math.floor(Math.random() * TIPS.safe.length)]] : TIPS[result.high ? 'phishing' : result.level];
+    const general = result.level === 'safe' ? [TIPS.safe[Math.floor(Math.random() * TIPS.safe.length)]] : TIPS[result.high ? 'phishing' : result.level];
+    const tips = result.level === 'safe' ? general : [...(result.tips || []), ...general]; // advice for what was found comes first
     card.append(h('section', {}, h('h4', {}, result.level === 'safe' ? 'Safety tip' : 'What you should do'), h('ul', {}, tips.map((t) => h('li', {}, t)))));
 
     const note = h('div', { class: 'note', hidden: true });
@@ -219,7 +257,9 @@
     return host;
   }
 
+  // ---------- the link warning dialog ----------
   // Click warning. Resolves true if the user insists on opening the link.
+  // "Go back to safety" is focused and is the default; Escape and clicking outside also cancel.
   // opts.expand: optional promise for a shortened link, resolving to the judged final destination (or null).
   function confirmLink(info, opts) {
     opts = opts || {};
@@ -264,6 +304,8 @@
     });
   }
 
+  // ---------- the hover tooltip ----------
+  // One tooltip element, created on first use and reused; positioned below the link (or above, near the bottom).
   let tipHost = null, tipEl = null;
   function showTooltip(anchor, info) {
     if (!tipHost) {

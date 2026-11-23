@@ -47,6 +47,9 @@ Edge: load the same folder at `edge://extensions`. Firefox 128+: run `npm run pa
 - **Authentication:** On Gmail, the message's own `Authentication-Results` header is read through Gmail's "Show original" page, on the device. DMARC pass makes a brand address "verified". DMARC fail on a brand address means the From line is forged. Other providers don't expose headers, so a brand address there is "matching, not verified" and earns less trust.
 - **Sender:** a brand name shown in the display name while the address is a free account or another domain; lookalike domains (paypa1, rnicrosoft, Cyrillic letters, `brand-secure-login.com`, typos); an email address written in the display name; risky TLDs.
 - **Sender history:** "first email from this sender" (only counts when it also asks for money, details or secrecy), and "familiar name, new address", the CEO and vendor fraud pattern. Stored as salted SHA-256 hashes; collection needs 14 days or 150 senders before "first email" is used.
+- **Reply-chain hijack:** in a Gmail conversation, a reply from a different company than the earlier messages, flagged strongly when it's a look-alike (`northwind` → `northwlnd`). Anywhere, a new address that's one character off a domain or address you regularly hear from is flagged. This is found by fingerprinting the possible originals, never by storing who you email. A "Re:" subject from someone you've never heard from is also flagged.
+- **Payment changes:** wording such as "our bank details have changed" or "pay the new account", in its own scoring bucket. Bank numbers (IBANs, US routing numbers, UK sort codes) are recognised by their checksums. Each known sender's bank details are remembered as fingerprints, so *different* details from a familiar supplier raise a strong warning, with advice to call the supplier on a number you already have.
+- **"Show me":** every reason in the banner has a button that scrolls to and highlights the exact sender, link, words, attachment or QR image it refers to. Text is marked with the browser's CSS Custom Highlight API, so the email's page is never altered.
 - **Links:** link text shows one domain but the link goes to another; IP-address links; punycode; `@` tricks; a brand's real domain used as a subdomain (`paypal.com.evil.ru`); shorteners (followed on click); http; unusual ports; `javascript:`/`data:` links; sign-in forms inside the email. Outlook Safe Links and Google redirect links are unwrapped first.
 - **QR codes:** images in the email are decoded with jsQR in the background worker, and their URLs are checked like links.
 - **Attachments:** names from the page's attachment list: double extensions, programs, disk images, macro documents, locked archives, reversed (RTLO) names. Gmail HTML attachments are read for login forms and redirects.
@@ -91,15 +94,39 @@ The full policy is in [PRIVACY.md](PRIVACY.md). In short:
 - Stored on the device: settings, counts, trusted and reported lists, the downloaded threat lists, salted hashes of past senders, which kinds of warning signs you've received (for practice mode), and, only if password alert is on, a 4-byte fragment of a slow salted hash of your mail password.
 
 ## Supported providers
-Gmail and Yahoo have dedicated adapters. Outlook and other webmail use an ARIA-based generic adapter. Webmail sites change their HTML often. When a known site shows an inbox but Tripwire finds nothing, the toolbar icon shows **!** and the popup explains it. Fix the selectors in `src/providers.js`.
+Gmail and Yahoo have dedicated adapters. Outlook and other webmail use an ARIA-based generic adapter. Webmail sites change their HTML often. When a known site shows an inbox but Tripwire finds nothing, the toolbar icon shows **!** and the popup explains it.
+
+### Fixing a layout change without a new release
+Every site-specific selector lives in **`data/selectors.json`**, the webmail layout rules. To fix a broken site:
+1. Edit the selector in `data/selectors.json` and raise its `version` by 1.
+2. Copy the same change into `src/selectors.js` (the built-in copy; `npm test` fails if they differ).
+3. Push to `main`.
+
+The "Publish signed threat list" workflow runs straight away. It signs the file with the project key and publishes it, and the Tripwire server verifies and mirrors it. Every installed Tripwire picks it up at its next update, or within minutes on a site that just broke. The health check asks for new rules as soon as detection stops working.
+
+Updated rules are data only: CSS selectors, each validated before use. A rules file needs a valid signature and a higher version, and `minExtension` stops rules from reaching versions too old to understand them. For every lookup, the updated selector is tried first and the built-in one second, so a bad update can't make detection worse than before.
 
 ## Development
 ```
-npm test              # 116 checks: analyzer, auth parsing, threat index, practice lessons, manifest
+npm test              # unit tests: analyzer, auth parsing, threat index, signatures, server, lessons, manifest
+npm run test:e2e      # browser tests (needs CHROME_PATH, see below)
 npm run build:intel   # re-download the feeds into data/
 npm run package       # dist/ folders and zips for chrome, edge, firefox
+npm run store:assets  # store screenshots and promo tile into store/ (needs CHROME_PATH)
 ```
 The same analyzer cases also run in the browser: open `test/analyzer-tests.html`.
 
-## Not done yet
-- **Opt-in sharing of reported domains.** This needs a server to collect and publish the shared list. The plan is to send only salted hashes of domains the user reports, and only with explicit opt-in.
+### Browser tests
+`test/e2e/run.mjs` loads the extension into a real Chrome and opens fake Gmail, Outlook and Yahoo pages at their real addresses. The browser has no network: mail-site requests are answered from `test/e2e/fixtures.mjs`. It checks:
+- inbox colours, and the banner on the email being read (not on compose boxes)
+- Gmail's "Show original" authentication check, the HTML-attachment check and "Show me"
+- the link warning
+- that a simulated redesign sets the **!** badge, and new layout rules fix it
+- that the popup and practice mode work, and no page throws an error
+
+It needs no npm packages, only Node 22+ and **Chrome for Testing**: regular Chrome no longer loads extensions from the command line. Download it from https://googlechromelabs.github.io/chrome-for-testing/ and set `CHROME_PATH` to its `chrome` executable. CI does this automatically (the `browser` job).
+
+The fake pages copy the structure of the real sites. When a site changes, update `data/selectors.json` (see below) and the matching fixture.
+
+## Tripwire server
+`server/` holds the small service at `tripwire.sparkv2.com`. It mirrors the threat list and collects opt-in community reports (SHA-256 fingerprints of domains only), published once 3 different networks report a domain. See [server/README.md](server/README.md) for the setup, the hardening and the Cloudflare Tunnel.

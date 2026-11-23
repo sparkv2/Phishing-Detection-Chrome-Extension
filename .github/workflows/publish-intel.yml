@@ -1,0 +1,57 @@
+# Builds the threat list from the public feeds every 6 hours, signs it, and publishes it as the "intel-latest"
+# release. The Tripwire server and the extension only accept it with a valid signature, and the signing key lives
+# only in this repository's secrets (TRIPWIRE_SIGNING_KEY), never on the server.
+name: Publish signed threat list
+on:
+  schedule:
+    - cron: '23 */6 * * *'
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['data/selectors.json']   # a webmail layout fix goes out right away, not at the next scheduled run
+
+permissions:
+  contents: write   # to update the release assets
+
+concurrency:
+  group: publish-intel
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+      - name: Build from the public feeds
+        run: node tools/build-threat-intel.mjs --out out
+      - name: Sign
+        env:
+          TRIPWIRE_SIGNING_KEY: ${{ secrets.TRIPWIRE_SIGNING_KEY }}
+        run: |
+          if [ -z "$TRIPWIRE_SIGNING_KEY" ]; then echo "::error::Add the TRIPWIRE_SIGNING_KEY repository secret first."; exit 1; fi
+          node tools/sign-intel.mjs out
+          cp data/selectors.json out/selectors.json
+          node tools/sign-intel.mjs --file out/selectors.json
+      - name: Check the signatures with the key the extension ships
+        run: |
+          node -e "
+            for (const f of ['src/data.js','src/analyzer.js','src/intel.js','src/selectors.js']) require('./' + f);
+            const fs = require('fs');
+            (async () => {
+              const m = await PG_Intel.verifyIntel(fs.readFileSync('out/threat-intel.meta.json'), fs.readFileSync('out/threat-intel.meta.json.sig','utf8'), fs.readFileSync('out/threat-intel.bin'));
+              console.log('list verified', m.generated, m.total);
+              const r = await PG_Intel.verifyRules(fs.readFileSync('out/selectors.json'), fs.readFileSync('out/selectors.json.sig','utf8'));
+              if (r.format !== 1 || !Number.isInteger(r.version)) throw new Error('selectors.json: bad format');
+              console.log('layout rules verified, version', r.version);
+            })().catch((e) => { console.error(e.message); process.exit(1); });"
+      - name: Publish to the intel-latest release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view intel-latest >/dev/null 2>&1 || gh release create intel-latest --prerelease --title "Signed threat list (auto-updated)" \
+            --notes "Rebuilt every 6 hours by .github/workflows/publish-intel.yml. Verify with the public key in src/intel.js."
+          gh release upload intel-latest out/threat-intel.bin out/threat-intel.meta.json out/threat-intel.meta.json.sig \
+            out/selectors.json out/selectors.json.sig --clobber

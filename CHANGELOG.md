@@ -14,6 +14,42 @@
 - **Attachments:** OneNote (`.one`), Excel add-ins (`.xll`), `.iqy`, `.slk`, `.appref-ms`, `.library-ms`, `.search-ms` and similar delivery formats are now flagged as programs.
 - 22 regression tests added (`test/cases.js`).
 
+## 1.4.1 (2026-11-20)
+- **Fix: sender authentication on live Gmail.** Gmail keeps the message ID one level above where Tripwire looked, so "Show original" was never fetched, and real brand mail showed "not verified" instead of "✓ verified". Found by checking Tripwire on a real Gmail account. The headers are now also read as plain text, which works with Gmail's Trusted Types security policy.
+- **Browser tests** (`npm run test:e2e`, the `browser` job in CI): the extension is loaded into Chrome for Testing and checked on fake Gmail, Outlook and Yahoo pages, including a simulated Gmail redesign recovered by updated layout rules.
+- **Store preparation:** screenshots and a promo tile generated from the real extension (`npm run store:assets`, in `store/`). Store packages no longer include the local demo-file permission. The Firefox add-on ID is `tripwire@sparkv2.com`.
+
+## 1.4.0 (2026-11-19)
+- **Reply-chain hijack detection.**
+  - In Gmail conversations, a reply from a different company than the earlier messages is flagged, strongly when it's a look-alike address.
+  - Anywhere, a new address that's a near-copy of a domain or address you regularly hear from is flagged, using fingerprints only.
+  - Fake "Re:" subjects from strangers are flagged.
+- **Payment-change alerts.**
+  - Detects requests to send money to a new account, scored separately because that scam's wording is often calm.
+  - Recognises IBANs, US routing numbers and UK sort codes by their checksums.
+  - Warns strongly when a known supplier's bank details differ from the ones they sent before.
+  - Gives specific advice to confirm by phone first.
+- **"Show me".** Each reason in the banner can scroll to and highlight the exact part of the email it's about.
+- **Webmail layout fixes without a new release.**
+  - Every site-specific selector now lives in `data/selectors.json`, the webmail layout rules.
+  - A change pushed to `main` is signed by GitHub Actions, mirrored by the Tripwire server, and verified by the extension, which picks it up at its next update.
+  - When the health check notices a site has broken, the extension looks for a fix immediately.
+  - Updated selectors are tried first and the built-in ones second, so a bad update can't make detection worse.
+- A practice lesson about invoice fraud.
+
+## 1.3.1 (2026-11-18): security hardening
+- **Signed threat list.** GitHub Actions builds and signs the list every 6 hours. The server and the extension only accept it with a valid Ed25519 signature, a matching checksum, and a date that is newer than the current list and less than 3 days old. The signing key never touches the server.
+- **The extension never flags protected sites** (brands, free mail, trackers, shared platforms) as a whole, even if a downloaded list includes them.
+- **Community reports are harder to fake.** IPv6 reporters are grouped by /32 instead of /48, a domain's first report must be a day old before it's published, and the store is capped at 500,000 reports. An admin tool (`server/tripwire-admin.mjs`) can check, suppress and restore domains.
+- **Server network isolation.** The server can no longer open connections into the home network. `cloudflared` runs as an unprivileged, sandboxed user that can't reach private addresses either.
+- GitHub Actions are pinned to exact commits.
+
+## 1.3.0 (2026-11-18)
+- **Tripwire server** at `tripwire.sparkv2.com` (see `server/`). Live list updates now download one compact file from the server, which rebuilds it from the public feeds every 6 hours. If the server is down, the extension downloads the feeds directly, as before.
+- **Community reports.** An opt-in setting, **Share my reports anonymously**, sends a SHA-256 fingerprint of a reported scam domain, and nothing else. Domains reported from 3 or more different networks get a yellow warning for every Tripwire user. They're never shown as a confirmed (red) scam.
+- **Fix:** live feed updates no longer crash on very large lists (a stack overflow when merging more than 100,000 entries).
+- The privacy policy has been updated to describe the server.
+
 ## 1.2.0 (2026-11-18)
 
 ### Detection
