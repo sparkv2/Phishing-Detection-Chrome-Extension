@@ -2,6 +2,7 @@
 
 ## Unreleased
 - **Red for direct requests.** An email that asks you to send a password, security code or personal details (an SSN, card or bank number, date of birth...) is now red, even when no threat list knows the sender. So is an email telling you to send money, gift cards or cryptocurrency, unless it comes from someone you trust, a brand address that passed authentication, or someone you've emailed with before. Warnings such as "we will never ask for your password" don't count.
+- **Look-alike company addresses are red.** A sender address that misspells the company the email names (`support@menrds.com` from "Menards", `billing@hartwe1llumber.com` from "Hartwell Lumber") is flagged even for companies Tripwire has never heard of. Look-alikes of known brands and of people you email with are now red too. 18 more brands were added to the built-in list (The Home Depot, Lowe's, Menards, Target, Costco, Best Buy, Verizon, AT&T, T-Mobile, Xfinity, Instagram, WhatsApp, TikTok, Norton, McAfee, Hulu, Disney+).
 - **Red for strong signs of a scam.** Emails whose warning signs add up to a score below 35 (what used to be the yellow "Very suspicious") are now red. Yellow is kept for milder warning signs.
 
 ## 1.4.1 (2026-11-20)

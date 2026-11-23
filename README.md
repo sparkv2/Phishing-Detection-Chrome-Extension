@@ -81,6 +81,7 @@ About 193,000 known-bad domains, IPs and URLs, compiled from free public feeds:
   - the sender or a link (or QR code) is on the known-threat list, the built-in list, or reported by the user (score 0, "Known phishing");
   - the email asks you to send a password, security code or personal details (SSN, card or bank number, date of birth...), unless you trust the sender;
   - the email tells you to send money, gift cards or crypto, and the sender isn't trusted, an authenticated brand, or someone you've emailed before;
+  - the sender's address imitates a known brand, the company the email itself names (`menrds.com` from "Menards"), or someone you email with;
   - the warning signs add up to a score below 35 (strong signs of a scam).
 - **Yellow** when the score is 35–69: some warning signs, not enough to call it a scam.
 - **Safe** at 70 or above. Score = 100 − weighted signals; unconfirmed emails never go below 10.

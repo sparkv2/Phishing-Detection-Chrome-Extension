@@ -38,6 +38,15 @@
       body: 'Kindly update your bank details by replying to this email.', links: [] }, 'phishing'],
     ['Asks for card number and CVV', { senderName: 'Support', senderEmail: 'support@delivery-help.example', subject: 'Payment',
       body: 'To release your parcel, reply with your card number and the CVV on the back.', links: [] }, 'phishing'],
+    // Look-alike domains of the company the email itself names (no built-in brand list needed).
+    ['Menards misspelled, named in the sender', { senderName: 'Menards', senderEmail: 'support@menrds.com', subject: 'Your order',
+      body: 'Your order has shipped. Track it in your account.', links: [] }, 'phishing'],
+    ['Menards misspelled, named only in the text', { senderName: 'Customer Service', senderEmail: 'orders@menrds.com', subject: 'Order update',
+      body: 'Thank you for shopping at Menards. Your order has shipped.', links: [] }, 'phishing'],
+    ['Small company with a digit swap', { senderName: 'Hartwell Lumber', senderEmail: 'billing@hartwe1llumber.com', subject: 'Invoice',
+      body: 'Your Hartwell Lumber invoice is ready.', links: [] }, 'phishing'],
+    ['Home Depot with zero for o', { senderName: 'The Home Depot', senderEmail: 'orders@homedep0t.com', subject: 'Your order',
+      body: 'Your order is ready for pickup.', links: [] }, 'phishing'],
     ['Stranger demands money', { senderName: 'Grace', senderEmail: 'grace.help.2024@gmail.com', subject: 'Urgent help',
       body: 'I am stuck abroad and lost my wallet. Please send me $500 through Western Union today, I will pay you back.', links: [] }, 'phishing'],
     ['Bitcoin extortion', { senderName: 'Hacker', senderEmail: 'x@protonmail.com', subject: 'I recorded you',
@@ -63,6 +72,12 @@
     ['Coworker sends the slides', { senderName: 'Priya Shah', senderEmail: 'priya@acme.example', subject: 'Deck', body: 'Can you send me the slides from Tuesday and share your notes? Thanks!', links: [] }, 'safe'],
     ['Known friend asks to be paid back', { senderName: 'Alex', senderEmail: 'alex.rivera@gmail.com', subject: 'Dinner', body: 'Fun night! Venmo me $25 for dinner when you get a chance.', links: [],
       history: { mature: true, seenBefore: true } }, 'safe'],
+    // Name look-alike false-alarm traps.
+    ['Real Menards', { senderName: 'Menards', senderEmail: 'orders@menards.com', subject: 'Your order', body: 'Thank you for shopping at Menards. Your order has shipped.', links: [] }, 'safe'],
+    ['Real Home Depot', { senderName: 'The Home Depot', senderEmail: 'homedepot@order.homedepot.com', subject: 'Order confirmed', body: 'Thanks for your Home Depot order.', links: [] }, 'safe'],
+    ['Person with their own domain spelled differently', { senderName: 'Jon Smith', senderEmail: 'jon@johnsmith.com', subject: 'Photos', body: 'Here are the photos from Saturday.', links: [] }, 'safe'],
+    ['Company mentions a similar word', { senderName: 'Stripe', senderEmail: 'receipts@stripe.com', subject: 'Receipt', body: 'Thanks for your purchase from Stars and Stripes Diner via Stripe.', links: [] }, 'safe'],
+    ['Newsletter domain differs from a capitalised word', { senderName: 'Morning Brew', senderEmail: 'crew@morningbrew.com', subject: 'Today', body: 'Markets rallied. Brewers fans celebrated. Morning Brew has the rest.', links: [] }, 'safe'],
     ['Bank statement ready (real chase)', { senderName: 'Chase', senderEmail: 'no.reply.alerts@chase.com', subject: 'Your statement is ready', body: 'Your credit card statement is available. Your payment is due on 11/28. Sign in to chase.com to view it.', links: [{ href: 'https://www.chase.com/statements', text: 'chase.com' }] }, 'safe'],
     ['Trusted sender overrides wording', { senderName: 'Dad', senderEmail: 'dad@family.example', subject: 'URGENT', body: 'Urgent! Please send me the bank account routing number immediately for the house payment.', links: [] }, 'safe', { trusted: new Set(['dad@family.example']) }],
     ['Lookup returned clean (null)', { senderName: 'News', senderEmail: 'news@site.example', subject: 'Read', body: 'An article you might like to read today.', links: [{ href: 'https://good.example/a', text: 'Read more' }] }, 'safe', T([['good.example', null]])],
@@ -128,7 +143,7 @@
     history: { seenBefore: true, mature: true, knownDomain: true, bankChanged: true, bankChangedDomain: 'northwind-supplies.example' } }, 'suspicious']);
   EMAILS.push(['Imitates a supplier you correspond with (hashed history match)', { senderName: 'Northwind Accounts', senderEmail: 'billing@northwind-supplies.co', subject: 'Invoice overdue',
     body: 'Your invoice is overdue. Please arrange payment today.', links: [],
-    history: { seenBefore: false, mature: true, lookalikeOf: 'northwind-supplies.example' } }, 'suspicious']);
+    history: { seenBefore: false, mature: true, lookalikeOf: 'northwind-supplies.example' } }, 'phishing']);
   EMAILS.push(['New company joins a thread, harmless note', { senderName: 'Sam Lee', senderEmail: 'sam@partner-agency.example', subject: 'Re: Launch plan',
     body: 'Thanks for looping me in, happy to help with the launch next week.', links: [],
     thread: { senders: ['priya@mycompany.example'] } }, 'safe']);

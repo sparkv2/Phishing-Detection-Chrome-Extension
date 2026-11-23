@@ -138,6 +138,59 @@
     subdomain: (b, h) => `"${h}" puts "${b.name}" at the start of the address, but the part that really matters (the end) belongs to someone else.`,
   };
 
+  // ---------- look-alikes of the company the email names ----------
+  // The brand list can't hold every company. So also compare the sender's domain with the company the email itself
+  // claims to be: its display name ("Menards", "The Home Depot") and capitalised names in the subject and text.
+  // A domain that is a near-miss spelling of that name (menrds.com, homedep0t.com) is an impersonation.
+  // Only near-misses count; a domain that contains the full name (menards-email.com) is not flagged here.
+  const NAME_FILLER = new Set(['the', 'inc', 'llc', 'ltd', 'co', 'corp', 'company', 'store', 'stores', 'shop', 'official',
+    'do', 'not', 'from', 'your', 'via', 'and', 'of']);
+  function nameClaims(name, email) {
+    const words = (name || '').replace(/[^\p{L}\p{N}\s'&.-]/gu, ' ').split(/[\s.&'-]+/).filter(Boolean);
+    const kept = words.filter((w) => !NAME_FILLER.has(lc(w)) && !D.SERVICE_WORDS.includes(lc(w)));
+    if (!kept.length) return [];
+    // A person's name ("Jon Smith" <jon@johnsmith.com>): their own domain may be spelled any way they like.
+    const local = lc((email || '').split('@')[0]);
+    const personLike = kept.length >= 2 && kept.length <= 3 && kept.every((w) => /^\p{Lu}\p{Ll}+$/u.test(w));
+    if (personLike && kept.some((w) => w.length >= 3 && local.includes(lc(w)))) return [];
+    const joined = lc(kept.join(''));
+    return joined.length >= 5 ? [joined] : [];
+  }
+  function textClaims(text) {
+    const out = new Set();
+    const words = (text || '').slice(0, 3000).match(/\b\p{Lu}[\p{L}'’]+\b/gu) || [];
+    for (let i = 0; i < words.length; i++) {
+      const w = lc(words[i]).replace(/['’]/g, '');
+      if (w.length >= 6) out.add(w);
+      if (i + 1 < words.length) { const pair = w + lc(words[i + 1]).replace(/['’]/g, ''); if (pair.length >= 7) out.add(pair); }
+    }
+    return [...out];
+  }
+  // Returns { claim, kind: 'homoglyph'|'typo', from: 'name'|'text' } when the sender's domain imitates a name the
+  // email uses, otherwise null.
+  function nameLookalike(sender, subject, body) {
+    const domain = lc(sender.domain);
+    if (!domain || isIP(domain) || brandOfDomain(domain)) return null;
+    const reg = registrableDomain(domain);
+    if (D.FREE_MAIL.includes(reg)) return null;
+    const label = domainLabel(reg).replace(/[-_]/g, '');
+    const norm = normalizeHomoglyphs(label);
+    if (label.length < 4) return null;
+    const text = (subject || '') + '\n' + (body || '');
+    // If the email also spells the domain's own name correctly, the domain is probably just this company's name.
+    if (wordRe(label).test(text)) return null;
+    const near = (claim, minLen) => {
+      if (claim.length < minLen || claim === label) return null;
+      if (norm === claim) return 'homoglyph';
+      const d = levenshtein(norm, claim);
+      if (d === 1 || (d === 2 && claim.length >= 9)) return 'typo';
+      return null;
+    };
+    for (const claim of nameClaims(sender.name, sender.email)) { const k = near(claim, 5); if (k) return { claim, kind: k, from: 'name' }; }
+    for (const claim of textClaims(text)) { const k = near(claim, 6); if (k) return { claim, kind: k, from: 'text' }; }
+    return null;
+  }
+
   // ---------- URLs ----------
   // Relative links resolve against a dummy base; a result on "invalid.local" therefore means "not a real web link".
   function parseUrl(href) {
@@ -1014,6 +1067,14 @@
     // ----- 4. history and 5. thread (both count as sender signals) -----
     senderSignals.push(...historySignals(input.history, sender, content.found, trusted, input.subject, moneyAsk));
     if (!trusted) senderSignals.push(...threadSignals(input.thread, sender, moneyAsk));
+    // A misspelling of the company the email itself names (menrds.com from "Menards"). Skipped for senders you trust
+    // or already correspond with, and when the brand list already caught it.
+    if (!trusted && !(input.history && input.history.seenBefore) && !senderSignals.some((x) => x.id === 'lookalike-sender')) {
+      const nl = nameLookalike(sender, input.subject, input.body);
+      if (nl) senderSignals.push(sig('lookalike-name', 'sender', 45, 'Fake company address',
+        `This email says it's from "${nl.claim}", but it was sent from ${sender.domain}, a ${nl.kind === 'homoglyph' ? 'look-alike using swapped characters (for example "0" for "o")' : 'misspelling'} of that name. Scammers register near-identical addresses to impersonate real companies.`,
+        sender.email, { type: 'sender' }));
+    }
     // ----- 7. attachments (the real list if the page shows one, otherwise file names mentioned in the text) -----
     const attachmentSignals = input.attachments && input.attachments.length ? analyzeAttachments(input.attachments, input.body)
       : [mentionedAttachment(input.body)].filter(Boolean);
@@ -1093,6 +1154,9 @@
       `This email tells you to send money, gift cards or cryptocurrency, and it comes from ${sender.email || 'a sender'} that Tripwire can't verify. Contact the person or company another way before paying anything.`,
       direct.money.slice(0, 3).map((x) => `"${x}"`).join(', '), { type: 'text', phrases: direct.money }));
     const redRequest = directSignals.length > 0;
+    // Impersonation: a look-alike of a known brand, of the company the email names, or of someone you email with.
+    const impersonation = senderSignals.some((x) => x.id === 'lookalike-name' || x.id === 'lookalike-correspondent' ||
+      (x.id === 'lookalike-sender' && x.weight >= 40));
 
     // Combination bonus: pressure + a sensitive request is the classic phishing recipe.
     const coercion = !!(content.found.urgency || content.found.fear || content.found.secrecy);
@@ -1136,16 +1200,17 @@
     const requestPenalty = directSignals.reduce((a, x) => a + x.weight, 0);
     let score = Math.round(100 - contentPenalty - senderPenalty - linkPenalty - attachmentPenalty - structurePenalty - aiPenalty - paymentPenalty - comboTech - requestPenalty);
     // 0 is reserved for confirmed phishing; unconfirmed emails bottom out at 10 however many warning signs they have.
-    score = known ? 0 : Math.max(10, Math.min(redRequest ? 20 : 100, score));
+    score = known ? 0 : Math.max(10, Math.min(redRequest || impersonation ? 20 : 100, score));
 
     // Red ("phishing") for:
     //   - confirmed phishing: a sender/link on a threat list, or one the user reported;
     //   - direct requests: a password or personal details, or money from a sender we can't vouch for;
+    //   - impersonation: a sender address that imitates a brand, the company the email names, or a correspondent;
     //   - strong signs of a scam: enough warning signs together to push the score below 35.
     // Milder warning signs are yellow ("suspicious"). `high` is kept for older callers and is now always false,
     // because strongly suspicious emails are red.
     let level = 'safe';
-    if (known || redRequest || score < 35) level = 'phishing';
+    if (known || redRequest || impersonation || score < 35) level = 'phishing';
     else if (score < 70) level = 'suspicious';
     const high = false;
 

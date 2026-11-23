@@ -44,6 +44,24 @@
     { name: 'Yahoo', keywords: ['yahoo'], domains: ['yahoo.com', 'yahoo-inc.com', 'yahoomail.com'] },
     { name: 'Roblox', keywords: ['roblox'], domains: ['roblox.com'] },
     { name: 'Discord', keywords: ['discord'], domains: ['discord.com', 'discord.gg', 'discordapp.com'] },
+    // Retailers, phone and internet companies, social apps and antivirus brands that scammers often copy.
+    { name: 'The Home Depot', keywords: ['home depot', 'homedepot'], domains: ['homedepot.com', 'homedepot.ca'] },
+    { name: 'Lowe\'s', keywords: ['lowe\'s', 'lowes'], domains: ['lowes.com', 'lowes.ca'] },
+    { name: 'Menards', keywords: ['menards'], domains: ['menards.com'] },
+    { name: 'Target', keywords: ['target.com', 'target circle'], domains: ['target.com'] },
+    { name: 'Costco', keywords: ['costco'], domains: ['costco.com', 'costco.ca'] },
+    { name: 'Best Buy', keywords: ['best buy', 'bestbuy', 'geek squad'], domains: ['bestbuy.com', 'bestbuy.ca', 'geeksquad.com'] },
+    { name: 'Instagram', keywords: ['instagram'], domains: ['instagram.com', 'mail.instagram.com'] },
+    { name: 'WhatsApp', keywords: ['whatsapp'], domains: ['whatsapp.com', 'whatsapp.net'] },
+    { name: 'TikTok', keywords: ['tiktok'], domains: ['tiktok.com'] },
+    { name: 'Verizon', keywords: ['verizon'], domains: ['verizon.com', 'verizonwireless.com'] },
+    { name: 'AT&T', keywords: ['at&t'], domains: ['att.com', 'att.net'] },
+    { name: 'T-Mobile', keywords: ['t-mobile', 'tmobile'], domains: ['t-mobile.com'] },
+    { name: 'Xfinity', keywords: ['xfinity', 'comcast'], domains: ['xfinity.com', 'comcast.com', 'comcast.net'] },
+    { name: 'Norton', keywords: ['norton'], domains: ['norton.com', 'nortonlifelock.com'] },
+    { name: 'McAfee', keywords: ['mcafee'], domains: ['mcafee.com'] },
+    { name: 'Hulu', keywords: ['hulu'], domains: ['hulu.com'] },
+    { name: 'Disney+', keywords: ['disney+', 'disney plus', 'disneyplus'], domains: ['disneyplus.com', 'disney.com'] },
   ];
 
   // Words that can surround a brand name in a display name without changing who it claims to be.
