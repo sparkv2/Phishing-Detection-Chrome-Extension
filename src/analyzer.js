@@ -1138,13 +1138,16 @@
     // 0 is reserved for confirmed phishing; unconfirmed emails bottom out at 10 however many warning signs they have.
     score = known ? 0 : Math.max(10, Math.min(redRequest ? 20 : 100, score));
 
-    // Red ("phishing") for confirmed phishing (a sender/link on the known-scam list or reported by the user), and
-    // for direct requests: a password or personal details, or money from a sender we can't vouch for.
-    // Everything else with warning signs is yellow ("suspicious"); `high` marks the strongly suspicious ones.
+    // Red ("phishing") for:
+    //   - confirmed phishing: a sender/link on a threat list, or one the user reported;
+    //   - direct requests: a password or personal details, or money from a sender we can't vouch for;
+    //   - strong signs of a scam: enough warning signs together to push the score below 35.
+    // Milder warning signs are yellow ("suspicious"). `high` is kept for older callers and is now always false,
+    // because strongly suspicious emails are red.
     let level = 'safe';
-    if (known || redRequest) level = 'phishing';
+    if (known || redRequest || score < 35) level = 'phishing';
     else if (score < 70) level = 'suspicious';
-    const high = !known && !redRequest && score < 35;
+    const high = false;
 
     // ----- the result -----
     // All reasons, most serious first (that is the order the banner shows them in).

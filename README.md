@@ -3,7 +3,7 @@
 Tripwire is a Chrome extension (also Edge and Firefox) that checks your email for scams while you read it. It works in Gmail, Outlook, Yahoo and other webmail, and it never sends your emails anywhere: every check runs on your own computer.
 
 **In your inbox**
-- Confirmed scams are coloured **red**, and suspicious emails are coloured **yellow**.
+- Scams are coloured **red** (confirmed scams, strong signs of a scam, and emails asking for passwords, personal details or money), and emails with milder warning signs are coloured **yellow**.
 - Open any email and a banner at the top shows a **safety score from 0 to 100**, a short summary, what the email wants you to do, and the reasons for any warning, in plain language.
 
 **What it catches**
@@ -34,7 +34,7 @@ Edge: load the same folder at `edge://extensions`. Firefox 128+: run `npm run pa
 ## How it works
 | Feature | Where |
 |---|---|
-| Inbox rows: **red** = known (confirmed) phishing only, **yellow** = suspicious but unconfirmed | `src/content.js`, `src/content.css` |
+| Inbox rows: **red** = confirmed or likely scam, **yellow** = some warning signs | `src/content.js`, `src/content.css` |
 | Banner at the top of an opened email (read view only, never in compose): summary, what it asks you to do, safety score 0–100, plain-language reasons, what to do next | `src/ui.js` |
 | Warns before you open risky links, and follows shortened links to their real destination; hover any link to see where it goes | `src/content.js` → `guardLinks`, `background.js` |
 | Report button (with provider-specific how-to) plus a local block list; "I know this sender" trust list | `src/content.js`, popup |
@@ -77,8 +77,12 @@ About 193,000 known-bad domains, IPs and URLs, compiled from free public feeds:
 - **Shared-platform safety:** big shared services (GitHub, Google Drive/Docs, Dropbox, Discord CDN, OneDrive, S3, bit.ly…) and every brand, free-mail and mail-tracking domain are never flagged as a whole. Only the exact listed URL is. Customer subdomains on hosting platforms (`evil.vercel.app`, `x.duckdns.org`) are flagged individually.
 
 ### Scoring and false-positive controls
-- **Red** only when the sender or a link (or QR code) is on the known-threat list, the built-in list, or reported by the user. Score is 0.
-- **Yellow** when the score is 10–69 and the email isn't on a known list. Below 35 the banner says "Very suspicious".
+- **Red** when:
+  - the sender or a link (or QR code) is on the known-threat list, the built-in list, or reported by the user (score 0, "Known phishing");
+  - the email asks you to send a password, security code or personal details (SSN, card or bank number, date of birth...), unless you trust the sender;
+  - the email tells you to send money, gift cards or crypto, and the sender isn't trusted, an authenticated brand, or someone you've emailed before;
+  - the warning signs add up to a score below 35 (strong signs of a scam).
+- **Yellow** when the score is 35–69: some warning signs, not enough to call it a scam.
 - **Safe** at 70 or above. Score = 100 − weighted signals; unconfirmed emails never go below 10.
 - Wording alone is capped at 45 points. AI is capped at 32. Attachments are capped at 60.
 - Mail from a proven brand address (DMARC pass) with clean links gets wording penalties reduced by 60%, an unverified brand address by 40%, trusted senders by 70%. Trusting a sender never hides a failed anti-forgery check.

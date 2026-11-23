@@ -124,8 +124,8 @@ try {
 
   // ---------------- Outlook ----------------
   page = await chrome.openPage(outlook.url, outlook.routes, outlook.hosts);
-  await check('Outlook: suspicious row coloured; banner on the email being read, none on the compose box', async () => {
-    await page.waitFor(`document.querySelectorAll('.pg-row-suspicious').length >= 1`, 10000, 'row colour');
+  await check('Outlook: scam row coloured red; banner on the email being read, none on the compose box', async () => {
+    await page.waitFor(`document.querySelectorAll('.pg-row-phishing').length >= 1`, 10000, 'row colour');
     const b = await page.waitFor(`${BANNER}.length ? ${BANNER} : null`, 10000, 'banner');
     assert(b.length === 1, `expected one banner, got ${b.length}`);
     assert(b[0].before === 'read-body', 'banner is not above the reading pane');
@@ -137,10 +137,11 @@ try {
 
   // ---------------- Yahoo ----------------
   page = await chrome.openPage(yahoo.url, yahoo.routes, yahoo.hosts);
-  await check('Yahoo: DHL fee scam row coloured and banner shown', async () => {
-    await page.waitFor(`document.querySelectorAll('.pg-row-suspicious').length === 1`, 10000, 'row colour');
+  await check('Yahoo: DHL fee scam row coloured and red banner shown', async () => {
+    // The row only shows a snippet, so it may be yellow until the email is opened.
+    await page.waitFor(`document.querySelectorAll('.pg-row-suspicious, .pg-row-phishing').length === 1`, 10000, 'row colour');
     const b = await page.waitFor(`${BANNER}.length ? ${BANNER} : null`, 10000, 'banner');
-    assert(/suspicious/i.test(b[0].title), 'headline: ' + b[0].title);
+    assert(/danger/i.test(b[0].title), 'headline: ' + b[0].title); // strong signs of a scam: red
     assert(b[0].reasons.some((r) => /Fake DHL/.test(r)), 'lookalike reason missing: ' + b[0].reasons.join(' | '));
   });
   await closeTab(page);

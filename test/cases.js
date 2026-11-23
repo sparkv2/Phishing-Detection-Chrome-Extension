@@ -15,8 +15,8 @@
       links: [{ href: 'https://bit.ly/3xYz-o365', text: 'Keep my password' }] }, 'phishing'],
     ['DHL fee scam', { senderName: 'DHL Express', senderEmail: 'noreply@dhl-delivery-notice.top', subject: 'Package on hold: delivery fee unpaid',
       body: 'Dear Customer, Your package could not be delivered because a processing fee of $1.99 is unpaid. Pay the fee within 48 hours or your package will be returned.',
-      links: [{ href: 'https://dhl.com.redelivery-fee.top/pay', text: 'Pay now' }] }, 'suspicious'],
-    ['Apple homoglyph (cyrillic a) sender', { senderName: 'Apple', senderEmail: 'id@аpple.com', subject: 'Your Apple ID was locked', body: 'Your Apple ID has been locked for security reasons. Sign in to unlock your account.', links: [{ href: 'https://xn--pple-43d.com/unlock', text: 'Unlock' }] }, 'suspicious'],
+      links: [{ href: 'https://dhl.com.redelivery-fee.top/pay', text: 'Pay now' }] }, 'phishing'],
+    ['Apple homoglyph (cyrillic a) sender', { senderName: 'Apple', senderEmail: 'id@аpple.com', subject: 'Your Apple ID was locked', body: 'Your Apple ID has been locked for security reasons. Sign in to unlock your account.', links: [{ href: 'https://xn--pple-43d.com/unlock', text: 'Unlock' }] }, 'phishing'],
     ['CEO gift card (content only)', { senderName: 'Mark (CEO)', senderEmail: 'mark.ceo.office@outlook.com', subject: 'Quick favor',
       body: "Hi, Are you available? I need a favor. I'm in a meeting and can't talk. I need you to buy 5 gift cards for a client today, keep this confidential. Reply with the codes as soon as possible.", links: [] }, 'phishing'],
     ['Link text mismatch only', { senderName: 'Billing', senderEmail: 'billing@smallshop.example', subject: 'Invoice', body: 'Please see your invoice.',
@@ -24,7 +24,7 @@
     ['User-reported domain', { senderName: 'Bob', senderEmail: 'bob@scammy.example', subject: 'hi', body: 'hello there friend how are you', links: [] }, 'phishing', { blocked: new Set(['scammy.example']) }],
     ['Threat-listed link', { senderName: 'News', senderEmail: 'news@site.example', subject: 'Read', body: 'An article you might like to read today.', links: [{ href: 'https://bad.phish.example/a', text: 'Read more' }] }, 'phishing',
       T([['bad.phish.example', { cat: 'phishing', source: 'test list', matched: 'bad.phish.example' }]])],
-    ['Display name contains other email', { senderName: 'support@paypal.com', senderEmail: 'x83@mailer.ru', subject: 'Receipt', body: 'Your payment details need to be updated. Update your payment now.', links: [] }, 'suspicious'],
+    ['Display name contains other email', { senderName: 'support@paypal.com', senderEmail: 'x83@mailer.ru', subject: 'Receipt', body: 'Your payment details need to be updated. Update your payment now.', links: [] }, 'phishing'],
     // Direct requests: red even though no list confirms them.
     ['Asks for email and password by reply', { senderName: 'Totally real person', senderEmail: 'someone@gmail.com', subject: 'Hello',
       body: 'Hello, Please respond to this email with your email and password. Best, Totally real person', links: [] }, 'phishing'],
@@ -32,6 +32,12 @@
       body: 'Hi, to keep receiving your paycheck please reply with your full social security number and date of birth.', links: [] }, 'phishing'],
     ['Asks for the one-time code', { senderName: 'Sam', senderEmail: 'sam.k1982@yahoo.com', subject: 'oops',
       body: 'I accidentally sent my verification code to your phone. Can you text me the code? What is your verification code?', links: [] }, 'phishing'],
+    ['Asks for bank account and routing number', { senderName: 'Payroll Team', senderEmail: 'payroll.team.hr@gmail.com', subject: 'Direct deposit update',
+      body: 'Hello, please provide your bank account number and routing number so we can update your direct deposit.', links: [] }, 'phishing'],
+    ['Asks to update bank details', { senderName: 'Accounts', senderEmail: 'accounts@vendor-billing.example', subject: 'Action needed',
+      body: 'Kindly update your bank details by replying to this email.', links: [] }, 'phishing'],
+    ['Asks for card number and CVV', { senderName: 'Support', senderEmail: 'support@delivery-help.example', subject: 'Payment',
+      body: 'To release your parcel, reply with your card number and the CVV on the back.', links: [] }, 'phishing'],
     ['Stranger demands money', { senderName: 'Grace', senderEmail: 'grace.help.2024@gmail.com', subject: 'Urgent help',
       body: 'I am stuck abroad and lost my wallet. Please send me $500 through Western Union today, I will pay you back.', links: [] }, 'phishing'],
     ['Bitcoin extortion', { senderName: 'Hacker', senderEmail: 'x@protonmail.com', subject: 'I recorded you',
@@ -86,7 +92,7 @@
     // ---------- QR codes ----------
     ['QR code to a lookalike login page', { senderName: 'IT Service Desk', senderEmail: 'it@company.example', subject: 'MFA re-enrolment required',
       body: 'Your multi-factor authentication must be renewed within 24 hours. Scan the QR code with your phone to keep access.', links: [],
-      qrCodes: [{ data: 'https://micros0ft-login-verify.example/mfa' }] }, 'suspicious'],
+      qrCodes: [{ data: 'https://micros0ft-login-verify.example/mfa' }] }, 'phishing'],
     ['QR code on a real event ticket', { senderName: 'Eventbrite', senderEmail: 'orders@eventbrite.example', subject: 'Your tickets', body: 'Show this QR code at the door.', links: [],
       qrCodes: [{ data: 'TICKET-88213-AB' }] }, 'safe'],
 
@@ -99,7 +105,7 @@
 
     // ---------- shortened links ----------
     ['Short link that expands to a lookalike', { senderName: 'Netflix', senderEmail: 'info@account-netflix.example', subject: 'Payment declined', body: 'Your payment failed. Update your payment details to keep watching.',
-      links: [{ href: 'https://bit.ly/nflx-pay', text: 'Update payment' }] }, 'suspicious', { expanded: new Map([['https://bit.ly/nflx-pay', 'https://netflix-billing-update.example/pay']]) }],
+      links: [{ href: 'https://bit.ly/nflx-pay', text: 'Update payment' }] }, 'phishing', { expanded: new Map([['https://bit.ly/nflx-pay', 'https://netflix-billing-update.example/pay']]) }],
 
     // ---------- on-device AI hints ----------
     ['Non-English credential scam (AI flags it)', { senderName: 'Servicio al cliente', senderEmail: 'avisos@banco-avisos.example', subject: 'Su cuenta',

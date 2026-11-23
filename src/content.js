@@ -258,7 +258,7 @@
       r.row.dataset.pgLevel = res.level;
       classify(r.row, res.level);
       if (res.level !== 'safe') {
-        r.row.setAttribute('title', `Tripwire: ${res.known ? 'KNOWN PHISHING (confirmed scam)' : res.level === 'phishing' ? 'Dangerous: asks for passwords, personal details or money' : res.high ? 'Very suspicious' : 'Suspicious'} — safety ${res.score}/100` +
+        r.row.setAttribute('title', `Tripwire: ${res.known ? 'KNOWN PHISHING (confirmed scam)' : res.level === 'phishing' ? 'Dangerous: likely a phishing scam' : res.high ? 'Very suspicious' : 'Suspicious'} — safety ${res.score}/100` +
           (res.top && res.top.length ? `\n• ${res.top.join('\n• ')}` : '') + '\nOpen the email to see the full explanation.');
       } else if ((r.row.getAttribute('title') || '').startsWith('Tripwire')) r.row.removeAttribute('title');
     }
