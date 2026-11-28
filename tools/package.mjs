@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { deflateRawSync } from 'node:zlib';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
-const INCLUDE = ['manifest.json', 'background.js', 'src', 'popup', 'offscreen', 'practice', 'vendor', 'icons', 'data', 'LICENSE'];
+const INCLUDE = ['manifest.json', 'background.js', 'src', 'popup', 'offscreen', 'practice', 'game', 'vendor', 'icons', 'data', 'LICENSE'];
 const targets = process.argv.slice(2).length ? process.argv.slice(2) : ['chrome', 'edge', 'firefox'];
 const base = JSON.parse(readFileSync(join(root, 'manifest.json'), 'utf8'));
 

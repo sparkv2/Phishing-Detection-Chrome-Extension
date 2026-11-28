@@ -1,6 +1,10 @@
 # Changelog
 
 ## Unreleased
+### Inbox Expedition (new)
+- A trail game, opened with **Play the game** in the popup. Pick a role and a pace, then lead a mail cart past 11 stops (Password Pass, Look-alike Lake, Link River, Gift Card Gulch...) to Secure Harbor. Each stop asks a cybersecurity question about what Tripwire checks for, with an explanation either way. Wrong answers cost trust unless you carry a 2FA security key; forts sell supplies; random events help or hurt. 36 questions, shuffled each time; your best score is kept on this computer only. Runs entirely in the extension, with no network access.
+- The popup's colour legend now matches the current red and yellow rules.
+
 ### Red and yellow
 - **Red for direct requests.** An email that asks you to send a password, security code or personal details (an SSN, card or bank number, date of birth...) is now red, even when no threat list knows the sender. So is an email telling you to send money, gift cards or cryptocurrency, unless it comes from someone you trust, a brand address that passed authentication, or someone you've emailed with before. Warnings such as "we will never ask for your password" don't count.
 - **Look-alike company addresses are red.** A sender address that misspells the company the email names (`support@menrds.com` from "Menards", `billing@hartwe1llumber.com` from "Hartwell Lumber") is flagged even for companies Tripwire has never heard of. Look-alikes of known brands and of people you email with are now red too. 18 more brands were added to the built-in list (The Home Depot, Lowe's, Menards, Target, Costco, Best Buy, Verizon, AT&T, T-Mobile, Xfinity, Instagram, WhatsApp, TikTok, Norton, McAfee, Hulu, Disney+).

@@ -18,7 +18,7 @@ Tripwire is a Chrome extension (also Edge and Firefox) that checks your email fo
 
 **Before you click:** if you click a risky link, Tripwire stops you first, shows where the link really goes, and explains the danger.
 
-**Optional extras:** protection on pages you open, a password alert, Chrome's on-device AI for emails in any language, and a practice mode with short "spot the red flag" lessons.
+**Optional extras:** protection on pages you open, a password alert, Chrome's on-device AI for emails in any language, a trail game (**Inbox Expedition**, from the popup) that quizzes you on scam tricks, and a practice mode with short "spot the red flag" lessons.
 
 **Your privacy:** your emails are never uploaded, stored or shared. Tripwire keeps only your settings, simple counts, and the senders you've trusted or reported, all on your device.
 
@@ -42,6 +42,7 @@ Edge: load the same folder at `edge://extensions`. Firefox 128+: run `npm run pa
 | Optional page guard and password alert | `src/guard.js` |
 | Optional on-device AI | `offscreen/ai.js` |
 | Practice mode | `practice/` |
+| Inbox Expedition (trail game) | `game/` (rules in `engine.js`, questions in `questions.js`) |
 
 ### Detection signals
 - **Authentication:** On Gmail, the message's own `Authentication-Results` header is read through Gmail's "Show original" page, on the device. DMARC pass makes a brand address "verified". DMARC fail on a brand address means the From line is forged. Other providers don't expose headers, so a brand address there is "matching, not verified" and earns less trust.

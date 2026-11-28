@@ -182,6 +182,7 @@ $('aiEnabled').onchange = async (e) => {
   await chrome.storage.local.set({ aiEnabled: e.target.checked });
   render();
 };
+$('gameBtn').onclick = () => { chrome.tabs.create({ url: chrome.runtime.getURL('game/game.html') }); };
 $('practiceLink').onclick = (e) => { e.preventDefault(); chrome.tabs.create({ url: chrome.runtime.getURL('practice/practice.html') }); };
 // The site box under the header: one sentence and one button (enable / stop checking this site).
 function showSite(text, label, fn) {

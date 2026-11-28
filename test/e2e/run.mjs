@@ -177,6 +177,51 @@ try {
     await closeTab(p);
   });
 
+  await check('Popup "Play the game" opens Inbox Expedition in a new tab', async () => {
+    const p = await chrome.openExtensionPage('popup/popup.html');
+    // Wait for popup.js to attach the click handler, not just for the button to exist.
+    await p.waitFor(`document.getElementById('gameBtn') && typeof document.getElementById('gameBtn').onclick === 'function'`, 10000, 'game button handler');
+    await p.eval(`document.getElementById('gameBtn').click(); return true;`);
+    const { targetInfos } = await chrome.conn.send('Target.getTargets');
+    let found = null;
+    for (let i = 0; i < 25 && !found; i++) {
+      const t = (await chrome.conn.send('Target.getTargets')).targetInfos.find((x) => x.type === 'page' && x.url.endsWith('/game/game.html'));
+      if (t) found = t; else await sleep(200);
+    }
+    assert(found, 'no game tab opened (targets: ' + targetInfos.map((t) => t.url).join(', ') + ')');
+    await chrome.conn.send('Target.closeTarget', { targetId: found.targetId });
+    await closeTab(p);
+  });
+  await check('Inbox Expedition: a whole game can be played to Secure Harbor', async () => {
+    const p = await chrome.openExtensionPage('game/game.html');
+    const click = (text) => p.eval(`const b = [...document.querySelectorAll('button')].find((x) => x.textContent.includes(${JSON.stringify(text)}) && !x.disabled); if (b) b.click(); return !!b;`);
+    await p.waitFor(`document.querySelector('button')`, 10000, 'title screen');
+    assert(await click('Start a new expedition'), 'start button');
+    assert(await click('Hit the trail'), 'hit the trail button');
+    // Answer every challenge correctly by reading the answer from the engine's own question bank.
+    for (let turn = 0; turn < 80; turn++) {
+      await sleep(50);
+      const text = await p.eval(`return document.getElementById('app').textContent;`);
+      if (/You reached Secure Harbor|Expedition over/.test(text)) break;
+      const want = await p.eval(`
+        const qText = [...document.querySelectorAll('.panel p')].map((x) => x.textContent).find((t) => TW_Game.QUESTIONS.some((q) => q.q === t));
+        if (!qText || !document.querySelector('.choice:not(:disabled)')) return null;
+        const q = TW_Game.QUESTIONS.find((x) => x.q === qText); return q.options[q.answer];`);
+      if (want) {
+        const ok = await p.eval(`const b = [...document.querySelectorAll('.choice')].find((x) => x.textContent.slice(2) === ${JSON.stringify(want)}); if (b) b.click(); return !!b;`);
+        assert(ok, 'answer button for: ' + want);
+        assert(await click('Continue') || await click('See what happened'), 'continue after answer');
+        continue;
+      }
+      assert(await click('Continue on the trail'), 'continue on the trail: ' + text.slice(0, 200));
+    }
+    const final = await p.waitFor(`document.querySelector('.big') && document.querySelector('.big').textContent`, 5000, 'end screen');
+    assert(/points/.test(final), 'expected a winning score, got: ' + final);
+    const best = await storage(['gameBest']);
+    assert(best.gameBest && best.gameBest.rank === 'Phish Hunter', 'best score saved: ' + JSON.stringify(best.gameBest));
+    await closeTab(p);
+  });
+
   await check('no JavaScript errors on any page', async () => {
     assert(!errors.length, errors.slice(0, 5).join('\n'));
   });
