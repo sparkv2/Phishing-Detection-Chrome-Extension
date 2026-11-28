@@ -17,10 +17,15 @@ const I = globalThis.PG_Intel, S = globalThis.PG_Selectors;
 const SOURCE = process.env.INTEL_SOURCE || 'https://github.com/sparkv2/Phishing-Detection-Chrome-Extension/releases/download/intel-latest';
 const OUT = process.env.INTEL_DIR || join(process.env.STATE_DIRECTORY || '/var/lib/tripwire', 'intel');
 
+// Files are verified after download, so cap their size first: a bad or hijacked download can't exhaust memory.
+const MAX_BYTES = 25 * 1024 * 1024;
 const get = async (name) => {
   const r = await fetch(`${SOURCE}/${name}`, { redirect: 'follow', signal: AbortSignal.timeout(60000), headers: { 'user-agent': 'tripwire-server' } });
   if (!r.ok) throw new Error(`${name}: HTTP ${r.status}`);
-  return Buffer.from(await r.arrayBuffer());
+  if (Number(r.headers.get('content-length') || 0) > MAX_BYTES) throw new Error(`${name}: too large`);
+  const chunks = []; let size = 0;
+  for await (const c of r.body) { size += c.length; if (size > MAX_BYTES) throw new Error(`${name}: too large`); chunks.push(c); }
+  return Buffer.concat(chunks);
 };
 const readJson = (name) => { try { return existsSync(join(OUT, name)) ? JSON.parse(readFileSync(join(OUT, name), 'utf8')) : null; } catch (e) { return null; } };
 // Write every file under a temporary name, then swap them in (data first, its description last).

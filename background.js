@@ -311,13 +311,36 @@ async function expandShortLink(href) {
   return out;
 }
 
+// ---------------- shared URL checks ----------------
+function isWebUrl(s) { try { return /^https?:$/.test(new URL(s).protocol); } catch (e) { return false; } }
+// Addresses inside the computer or the home network (localhost, 10.x, 192.168.x, fc00::...). Content from an email
+// must never make the extension send requests there.
+function isPrivateHost(host) {
+  host = (host || '').toLowerCase().replace(/^\[|\]$/g, '');
+  if (host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local') || host.endsWith('.internal')) return true;
+  const v4 = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (v4) {
+    const [a, b] = [Number(v4[1]), Number(v4[2])];
+    return a === 0 || a === 10 || a === 127 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 100 && b >= 64 && b <= 127);
+  }
+  if (host.includes(':')) return host === '::1' || host === '::' || /^f[cd]/.test(host) || /^fe[89ab]/.test(host) || host.startsWith('::ffff:');
+  return false;
+}
+// Images that need the user's sign-in to load (Gmail attachments and Google's image proxy). Everything else is
+// fetched without cookies, so an email can't make the extension send signed-in requests to other sites.
+const CREDENTIAL_IMAGE_HOSTS = /(^|\.)mail\.google\.com$|(^|\.)googleusercontent\.com$/;
+
 // ---------------- 5. QR codes ----------------
 // Fetches an image the email already showed, draws it on an off-screen canvas and asks jsQR for a QR code. Tries
 // the image at up to 1000 px, then at 500 px (small codes in big images decode better when scaled down).
 async function decodeQr(src) {
   if (!self.jsQR || typeof OffscreenCanvas === 'undefined') return null;
-  const res = await fetch(src, { credentials: 'include', referrerPolicy: 'no-referrer' });
+  let u; try { u = new URL(src); } catch (e) { return null; }
+  if (!/^https?:$/.test(u.protocol) || isPrivateHost(u.hostname)) return null;
+  const res = await fetch(u.href, { credentials: CREDENTIAL_IMAGE_HOSTS.test(u.hostname) ? 'include' : 'omit', referrerPolicy: 'no-referrer' });
   if (!res.ok) return null;
+  try { if (isPrivateHost(new URL(res.url).hostname)) return null; } catch (e) { return null; } // redirected into the home network
+  if (Number(res.headers.get('content-length') || 0) > 6e6) return null; // don't download huge files just to look
   const blob = await res.blob();
   if (blob.size > 6e6 || !/^image\//.test(blob.type || 'image/')) return null;
   const bmp = await createImageBitmap(blob);
@@ -505,6 +528,7 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
     case 'pg-share-report': return run(shareReport(msg.domain).catch(() => ({ ok: false })));
     case 'pg-community-changed': return run((async () => { await updateCommunity(await caches.open(CACHE)); return { ok: true }; })());
     case 'pg-open-risky':
+      if (!isWebUrl(msg.url)) return run(Promise.resolve({ ok: false })); // never javascript:, data:, file:, chrome:...
       return run(chrome.tabs.create({ url: msg.url, index: sender.tab ? sender.tab.index + 1 : undefined })
         .then((tab) => rememberRiskyOpen(tab.id, msg.url, msg.level)).then(() => ({ ok: true })));
     case 'pg-guard-context':

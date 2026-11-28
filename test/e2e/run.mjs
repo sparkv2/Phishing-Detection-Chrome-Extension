@@ -101,6 +101,16 @@ try {
     const open = await page.eval(`return !![...document.querySelectorAll('[data-pg-ui]')].find((x) => x.shadowRoot && x.shadowRoot.querySelector('.dialog'));`);
     assert(!open, 'dialog still open'); assert(after === before, 'a new tab was opened');
   });
+  await check('Gmail: a javascript: link gets the warning but can never be opened from it', async () => {
+    await page.eval(`const a = document.createElement('a'); a.id = 'js-link'; a.href = 'javascript:void(document.title="pwned")'; a.textContent = 'View invoice';
+      document.getElementById('body').append(a); a.click(); return true;`);
+    const dlg = await page.waitFor(`(() => { const x = [...document.querySelectorAll('[data-pg-ui]')].find((h) => h.shadowRoot && h.shadowRoot.querySelector('.dialog'));
+      return x ? { anyway: !!x.shadowRoot.querySelector('.link-anyway'), text: x.shadowRoot.querySelector('.dialog').textContent } : null; })()`, 10000, 'link dialog');
+    assert(!dlg.anyway, 'the dialog must not offer "open anyway" for a javascript: link');
+    assert(/isn't a web address/.test(dlg.text), 'explains why: ' + dlg.text.slice(0, 200));
+    await page.eval(`[...document.querySelectorAll('[data-pg-ui]')].find((x) => x.shadowRoot && x.shadowRoot.querySelector('.dialog')).shadowRoot.querySelector('.btn.primary').click(); document.getElementById('js-link').remove(); return true;`);
+    assert(await page.eval(`return document.title;`) !== 'pwned', 'the javascript: link ran');
+  });
   await check('Gmail: the health check reports the page as readable', async () => {
     await chrome.worker.waitFor(`(await chrome.storage.local.get('health')).health?.gmail?.ok === true`, 10000, 'health ok');
   });

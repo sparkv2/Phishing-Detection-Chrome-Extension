@@ -1,6 +1,12 @@
 # Changelog
 
 ## Unreleased
+### Security and speed
+- **`javascript:` and `data:` links can't be opened from Tripwire's warning.** Clicking "open anyway" on such a link used to fall back to opening it from the webmail page, where a `javascript:` link would run inside the mail site. The warning now explains it isn't a web address and offers only "Go back to safety"; the content script and background worker both refuse anything but `http`/`https`.
+- **QR-code images are fetched more carefully.** Only `http`/`https` images, never addresses on the computer or the home network (localhost, 192.168.x, 10.x...), cookies only for Google's mail and image hosts, and large files are skipped before downloading.
+- **Server:** threat-list and layout-rule downloads are capped at 25 MB before their signatures are checked.
+- **Faster checks:** about 45% less time per email (brand look-alike combinations and keyword patterns are built once instead of for every email). The content script's caches now have size limits, so a webmail tab left open for days doesn't keep growing.
+
 ### Inbox Expedition (new)
 - A trail game, opened with **Play the game** in the popup. Pick a role and a pace, then lead a mail cart past 11 stops (Password Pass, Look-alike Lake, Link River, Gift Card Gulch...) to Secure Harbor. Each stop asks a cybersecurity question about what Tripwire checks for, with an explanation either way. Wrong answers cost trust unless you carry a 2FA security key; forts sell supplies; random events help or hurt. 36 questions, shuffled each time; your best score is kept on this computer only. Runs entirely in the extension, with no network access.
 - The popup's colour legend now matches the current red and yellow rules.

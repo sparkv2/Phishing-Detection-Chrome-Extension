@@ -131,17 +131,42 @@
     return dp[a.length][b.length];
   }
   // Regex for a whole word (so "ups" doesn't match inside "groups").
-  function wordRe(word) { return new RegExp('(^|[^a-z0-9])' + word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '($|[^a-z0-9])', 'i'); }
+  // Compiled once per word and reused: these are built for every brand keyword on every email otherwise.
+  const WORD_RE = new Map();
+  const escRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  function wordRe(word) {
+    let re = WORD_RE.get(word);
+    if (!re) { re = new RegExp('(^|[^a-z0-9])' + escRe(word) + '($|[^a-z0-9])', 'i'); if (WORD_RE.size < 5000) WORD_RE.set(word, re); }
+    return re;
+  }
+  const CAPS_RE = new Map();
+  function capsRe(word) {
+    let re = CAPS_RE.get(word);
+    if (!re) { re = new RegExp('(^|[^A-Za-z0-9])' + escRe(word.toUpperCase()) + '($|[^A-Za-z0-9])'); CAPS_RE.set(word, re); }
+    return re;
+  }
 
   // Does free text name this brand? 3-letter names (UPS, IRS, DHL, AWS) used to be skipped entirely to avoid
   // matching ordinary words, which hid parcel-fee and tax-refund scams. They now count when written in capitals.
   function mentionsBrand(b, rawText) {
-    return b.keywords.some((k) => (k.length >= 4 ? wordRe(k).test(rawText)
-      : new RegExp('(^|[^A-Za-z0-9])' + k.toUpperCase() + '($|[^A-Za-z0-9])').test(rawText)));
+    return b.keywords.some((k) => (k.length >= 4 ? wordRe(k) : capsRe(k)).test(rawText));
   }
 
   // ---------- brand look-alikes ----------
-  function brandLabels(brand) { return uniq(brand.domains.map((d) => domainLabel(d)).filter((l) => l.length >= 3)); }
+  // Each brand's name labels ("paypal"), worked out once instead of on every check.
+  const BRAND_LABELS = new Map();
+  function brandLabels(brand) {
+    let l = BRAND_LABELS.get(brand);
+    if (!l) { l = uniq(brand.domains.map((d) => domainLabel(d)).filter((x) => x.length >= 3)); BRAND_LABELS.set(brand, l); }
+    return l;
+  }
+  // "paypalsecure", "securepaypal"...: every brand label glued to a phishing word, built once per label.
+  const COMBOS = new Map();
+  function combosOf(bl) {
+    let s = COMBOS.get(bl);
+    if (!s) { s = new Set(D.PHISH_DOMAIN_WORDS.flatMap((w) => [bl + w, w + bl])); COMBOS.set(bl, s); }
+    return s;
+  }
   function brandOfDomain(host) { return D.BRANDS.find((b) => domainMatches(host, b.domains)) || null; }
 
   // Brand names that are also everyday words ("apple", "chase", "office"): these only count as a fake brand domain
@@ -166,11 +191,7 @@
         if (label === bl && !generic) return { brand, kind: 'wrong-tld' }; // paypal.support
         const tokens = normLabel.split(/[-_]+/);
         if (tokens.length > 1 && tokens.includes(bl) && tokens.some((t) => t !== bl && D.PHISH_DOMAIN_WORDS.includes(t))) return { brand, kind: 'combo' };
-        if (bl.length >= 5) {
-          for (const w of D.PHISH_DOMAIN_WORDS) {
-            if (normLabel === bl + w || normLabel === w + bl) return { brand, kind: 'combo' };
-          }
-        }
+        if (bl.length >= 5 && combosOf(bl).has(normLabel)) return { brand, kind: 'combo' };
         if (!generic && ((bl.length >= 6 && levenshtein(normLabel, bl) === 1) || (bl.length >= 9 && levenshtein(normLabel, bl) === 2))) {
           return { brand, kind: 'typo' };
         }

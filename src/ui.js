@@ -307,15 +307,18 @@
         });
       }
       const back = h('button', { class: 'btn primary', onclick: () => close(false) }, 'Go back to safety');
+      // javascript:, data: and other non-web links can run code or fake a page: Tripwire never opens them.
+      const webLink = /^https?:\/\//i.test((info.finalHref || info.href || '').trim());
       const dlg = h('div', { class: 'dialog ' + level, role: 'alertdialog', 'aria-modal': 'true', 'aria-label': 'Link warning' },
         h('div', { class: 'dh' }, level === 'phishing' ? '⚠ Stop — this link looks dangerous' : '⚠ Wait — check this link first'),
         h('div', { class: 'db' },
           info.text ? h('div', { class: 'dest' }, h('div', { class: 'lbl' }, 'The link says'), h('div', { class: 'val' }, info.text.slice(0, 120))) : null,
           h('div', { class: 'dest' }, h('div', { class: 'lbl' }, 'It really goes to'), destVal, destNote),
           reasonsEl,
-          h('p', {}, 'If you need to visit this company, open their official app or type their address into your browser yourself.')),
+          webLink ? h('p', {}, 'If you need to visit this company, open their official app or type their address into your browser yourself.')
+            : h('p', {}, h('b', {}, 'This isn\'t a web address. '), 'Links like this can run code inside your mail page, so Tripwire won\'t open it.')),
         h('div', { class: 'actions' },
-          h('button', { class: 'link-anyway', onclick: () => close(true) }, 'I understand the risk, open anyway'), back));
+          webLink ? h('button', { class: 'link-anyway', onclick: () => close(true) }, 'I understand the risk, open anyway') : null, back));
       const overlay = h('div', { class: 'overlay', onclick: (e) => { if (e.target === overlay) close(false); } }, dlg);
       sr.append(overlay);
       document.documentElement.append(host);

@@ -22,11 +22,20 @@
 
   // ---------- state (all in memory, for this page only) ----------
   const state = { enabled: true, aiEnabled: false, trusted: new Set(), knownDomains: new Set(), blocked: new Set(), enabledHosts: [], disabledHosts: [], active: false };
-  const threats = new Map();  // threat-list answers: host or 'url:'+key -> hit, or null if clean
-  const expanded = new Map(); // shortened link -> where it really goes
-  const verdicts = new Map(); // email key -> { level, score, known, high, top } (so rows and banners agree)
-  const extras = new Map();   // email key -> results of the slow checks: { auth, attHtml, qr, ai, hist, started }
-  const seenKeys = new Set(); // emails already counted in the stats
+  // Caches with a size limit: a webmail tab can stay open for days, so the oldest entries are dropped first.
+  class CappedMap extends Map {
+    constructor(max) { super(); this.max = max; }
+    set(k, v) { if (!this.has(k) && this.size >= this.max) this.delete(this.keys().next().value); return super.set(k, v); }
+  }
+  class CappedSet extends Set {
+    constructor(max) { super(); this.max = max; }
+    add(v) { if (!this.has(v) && this.size >= this.max) this.delete(this.values().next().value); return super.add(v); }
+  }
+  const threats = new CappedMap(20000); // threat-list answers: host or 'url:'+key -> hit, or null if clean
+  const expanded = new CappedMap(2000); // shortened link -> where it really goes
+  const verdicts = new CappedMap(5000); // email key -> { level, score, known, high, top } (so rows and banners agree)
+  const extras = new CappedMap(300);    // email key -> results of the slow checks: { auth, attHtml, qr, ai, hist, started }
+  const seenKeys = new CappedSet(20000); // emails already counted in the stats
   const pendingStats = { scanned: 0, suspicious: 0, phishing: 0, warnings: 0 };
   let adapter = null, observer = null, scanTimer = null;
 
@@ -470,7 +479,10 @@
 
   // Opens a link in a new tab. Risky ones are opened by the background worker, which remembers the tab so the
   // optional page guard can warn harder if that page asks for a password.
+  // Only web addresses: a javascript: or data: link opened from here would run inside the webmail page.
   function openLink(url, risky, level) {
+    url = (url || '').trim();
+    if (!/^https?:\/\//i.test(url)) return;
     if (risky) send({ type: 'pg-open-risky', url, level }).then((r) => { if (!r) window.open(url, '_blank', 'noopener,noreferrer'); });
     else window.open(url, '_blank', 'noopener,noreferrer');
   }
@@ -557,7 +569,7 @@
   }
   // Which kinds of warning sign you've actually received (ids only, e.g. "lookalike-sender"). Practice mode uses it
   // to pick lessons about tricks aimed at you.
-  const signalSeen = new Set(), pendingSignals = {};
+  const signalSeen = new CappedSet(20000), pendingSignals = {};
   function countSignals(key, signals) {
     if (signalSeen.has(key)) return;
     signalSeen.add(key);
